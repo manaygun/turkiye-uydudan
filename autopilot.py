@@ -42,6 +42,7 @@ ROUNDS = 2
 WIDE_ZOOM = 2.2
 MAX_ATTEMPTS = 3          # places to try per run if one has too few clear years
 REFRESH_EVERY_DAYS = 7
+POSTS_PER_DAY = 24        # matches the hourly schedule in .github/workflows/autopilot.yml
 
 
 def load_env():
@@ -66,9 +67,15 @@ def now():
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
 
 
+def catalog():
+    """The world catalog once it exists, otherwise the original Turkey catalog."""
+    world = ROOT / "places_world.json"
+    return world if world.exists() else ROOT / "places_tr.json"
+
+
 def queue(state):
     """Places not yet posted or failed, in order: round 1 first, then round 2."""
-    places = json.loads((ROOT / "places_tr.json").read_text())
+    places = json.loads(catalog().read_text())
     done = {(p["id"], p["round"]) for p in state["posted"] + state["failed"]}
     for rnd in range(1, ROUNDS + 1):
         for place in places:
@@ -143,7 +150,7 @@ def render_next(dry_run):
         return
 
     if attempts == 0:
-        sys.exit("The place catalog is used up. Add more places to places_tr.json.")
+        sys.exit(f"The place catalog is used up. Add more places to {catalog().name}.")
     sys.exit(f"No place could be rendered in {attempts} attempts; will try the next ones on the next run.")
 
 
@@ -188,8 +195,8 @@ def publish(video_url):
 def status():
     state = load_state()
     upcoming = list(queue(state))
-    print(f"Posted: {len(state['posted'])}   Failed: {len(state['failed'])}   Left: {len(upcoming)}"
-          f"  (~{len(upcoming) / 6:.0f} days at 6/day)")
+    print(f"Catalog: {catalog().name}   Posted: {len(state['posted'])}   Failed: {len(state['failed'])}"
+          f"   Left: {len(upcoming)}  (~{len(upcoming) / POSTS_PER_DAY:.1f} days at {POSTS_PER_DAY}/day)")
     for p in state["posted"][-5:]:
         print(f"  ✔ {p['at'][:16]}  {p['id']} r{p['round']}  {p.get('permalink') or ''}")
     for place, rnd, _ in upcoming[:6]:

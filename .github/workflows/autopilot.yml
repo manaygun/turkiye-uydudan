@@ -2,13 +2,8 @@ name: Instagram autopilot
 
 on:
   schedule:
-    # 6 Reels a day, Turkey time (UTC+3): 08:00, 11:00, 13:30, 17:00, 20:00, 22:00
-    - cron: "0 5 * * *"
-    - cron: "0 8 * * *"
-    - cron: "30 10 * * *"
-    - cron: "0 14 * * *"
-    - cron: "0 17 * * *"
-    - cron: "0 19 * * *"
+    # 24 Reels a day: every hour at :17 (off the top of the hour, when GitHub's scheduler is busiest)
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       mode:

@@ -18,7 +18,7 @@ CREDITS = {
     "landsat": "Görüntüler: NASA / USGS Landsat.",
     "sentinel": "Contains modified Copernicus Sentinel data. Görüntüler: ESA Copernicus Sentinel-2.",
 }
-COMMON_TAGS = ["uydugörüntüsü", "türkiye", "keşfet"]
+COMMON_TAGS = ["uydugörüntüsü", "dünya", "keşfet"]
 
 
 def build_caption(place, hook, years, source, index):
@@ -35,7 +35,7 @@ def build_caption(place, hook, years, source, index):
         "",
         f"Bu videoda {place['name']} bölgesinin uydudan yıllar içindeki değişimini, "
         f"{first} yılındaki en eski haritadan {last} yılındaki en yeni haritaya kadar "
-        f"gerçek {sat} uydu görüntüleriyle izliyorsun. Türkiye'nin değişimini uydudan "
+        f"gerçek {sat} uydu görüntüleriyle izliyorsun. dünyanın değişimini uydudan "
         f"gösteren zaman atlamalı (timelapse) videolar için takip et.",
         "",
         cta,

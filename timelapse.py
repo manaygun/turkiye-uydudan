@@ -41,7 +41,8 @@ ROOT = Path(__file__).parent
 STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 W, H = 1080, 1920          # Reels size
 MAP = 1080                 # square map, full width
-MAP_TOP = 470              # leaves room for the hook above; Reels UI covers the bottom ~350 px
+MAP_TOP = 470              # leaves room for the hook and timeline above; Reels UI covers the bottom ~350 px
+SAFE_L, SAFE_R = 120, W - 120   # tall phones crop ~100 px off each side of a 9:16 Reel
 FPS = 30
 HANDLE = "@gecmistenharita"
 LOGO_MARK = ROOT / "assets" / "logo_mark.png"
@@ -239,67 +240,71 @@ def watermark():
 
 
 def background(title, hook, credit):
-    """Everything that stays the same in every frame."""
+    """Everything that stays the same in every frame (except the map)."""
     canvas = Image.new("RGB", (W, H), (12, 14, 18))
     d = ImageDraw.Draw(canvas)
-    lines = textwrap.wrap(hook, width=30)[:3]
-    d.text((W // 2, 200 if len(lines) < 3 else 160), title, font=font(58), fill="white", anchor="mm")
+    lines = textwrap.wrap(hook, width=28)[:3]
+    d.text((W // 2, 170 if len(lines) < 3 else 150), title, font=font(58), fill="white", anchor="mm")
     f = font(52)
-    y = 300 if len(lines) < 3 else 262
+    y = 240 if len(lines) < 3 else 222
     for line in lines:
         d.text((W // 2, y), line, font=f, fill=(255, 214, 92), anchor="mm")
-        y += 64
-    d.text((W // 2, MAP_TOP + MAP + 120), credit, font=font(26, bold=False),
-           fill=(120, 128, 140), anchor="mm")
+        y += 62
     return canvas
 
 
-def compose(bg, map_img, year, progress, years, size_km, end_card=False):
+def compose(bg, map_img, year, progress, years, size_km, credit, end_card=False):
+    """One video frame. Everything important stays inside SAFE_L..SAFE_R, because tall phones crop
+    the sides, and away from the like/comment/share buttons on the lower right."""
     canvas = bg.copy()
     canvas.paste(Image.fromarray(map_img), (0, MAP_TOP))
     d = ImageDraw.Draw(canvas)
 
+    # timeline between the hook and the map: oldest -> newest
+    ty, tx0, tx1 = MAP_TOP - 45, SAFE_L + 95, SAFE_R - 95
+    d.line([tx0, ty, tx1, ty], fill=(70, 76, 88), width=6)
+    xp = tx0 + (tx1 - tx0) * progress
+    d.line([tx0, ty, xp, ty], fill=(255, 214, 92), width=6)
+    d.ellipse([xp - 13, ty - 13, xp + 13, ty + 13], fill=(255, 214, 92))
+    small = font(30)
+    d.text((tx0 - 16, ty), str(years[0]), font=small, fill=(170, 178, 190), anchor="rm")
+    d.text((tx1 + 16, ty), str(years[-1]), font=small, fill=(170, 178, 190), anchor="lm")
+
     # year, big, top-left of the map
-    d.text((40, MAP_TOP + 30), str(year), font=font(130), fill="white",
+    d.text((SAFE_L, MAP_TOP + 30), str(year), font=font(130), fill="white",
            stroke_width=6, stroke_fill=(0, 0, 0), anchor="la")
 
-    # scale bar, bottom-left of the map
-    km = nice_scale(size_km)
-    px = km / size_km * MAP
-    x0, y0 = 40, MAP_TOP + MAP - 50
-    d.rectangle([x0, y0, x0 + px, y0 + 8], fill="white", outline="black")
-    d.text((x0 + px / 2, y0 - 22), f"{km:g} km", font=font(30), fill="white",
-           stroke_width=3, stroke_fill="black", anchor="mm")
-
-    # watermark, bottom-right of the map
+    # watermark, top-right of the map (the lower right is under Instagram's buttons)
     wm = watermark()
-    canvas.paste(wm, (W - wm.width - 30, MAP_TOP + MAP - wm.height - 24), wm)
+    canvas.paste(wm, (SAFE_R - wm.width, MAP_TOP + 40), wm)
 
     # follow card while the last (newest) year is held
     if end_card:
         f = font(46)
         label = f"Takip et → {HANDLE}"
         tw = f.getlength(label)
-        cy = MAP_TOP + MAP - 190
+        cy = MAP_TOP + 260
         d.rounded_rectangle([W / 2 - tw / 2 - 34, cy - 44, W / 2 + tw / 2 + 34, cy + 44],
                             radius=44, fill=(255, 214, 92))
         d.text((W / 2, cy), label, font=f, fill=(12, 14, 18), anchor="mm")
 
-    # timeline under the map: oldest -> newest
-    ty, tx0, tx1 = MAP_TOP + MAP + 55, 140, W - 140
-    d.line([tx0, ty, tx1, ty], fill=(70, 76, 88), width=6)
-    xp = tx0 + (tx1 - tx0) * progress
-    d.line([tx0, ty, xp, ty], fill=(255, 214, 92), width=6)
-    d.ellipse([xp - 13, ty - 13, xp + 13, ty + 13], fill=(255, 214, 92))
-    small = font(30)
-    d.text((tx0 - 20, ty), str(years[0]), font=small, fill=(170, 178, 190), anchor="rm")
-    d.text((tx1 + 20, ty), str(years[-1]), font=small, fill=(170, 178, 190), anchor="lm")
+    # scale bar, bottom-left of the map
+    km = nice_scale(size_km)
+    px = km / size_km * MAP
+    x0, y0 = SAFE_L, MAP_TOP + MAP - 60
+    d.rectangle([x0, y0, x0 + px, y0 + 8], fill="white", outline="black")
+    d.text((x0 + px / 2, y0 - 22), f"{km:g} km", font=font(30), fill="white",
+           stroke_width=3, stroke_fill="black", anchor="mm")
+
+    # imagery credit along the bottom edge of the map
+    d.text((500, MAP_TOP + MAP - 22), credit, font=font(22, bold=False), fill=(225, 228, 235),
+           stroke_width=2, stroke_fill=(0, 0, 0), anchor="mm")
     return np.asarray(canvas)
 
 
 # ---------------------------------------------------------------- audio + video
 
-def write_video(path, maps, years, bg, size_km, seed, mood="calm"):
+def write_video(path, maps, years, bg, size_km, credit, seed, mood="calm"):
     n = len(maps)
     hold = max(9, min(24, int(18 * FPS / n)))       # aim for ~20-30 s total
     fade = max(5, hold // 2)
@@ -323,14 +328,14 @@ def write_video(path, maps, years, bg, size_km, seed, mood="calm"):
             last = i == n - 1
             for k in range(end_hold if last else hold):
                 card = last and k >= FPS // 2          # show the follow card half a second in
-                writer.send(compose(bg, a, years[i], i * step, years, size_km, card).tobytes())
+                writer.send(compose(bg, a, years[i], i * step, years, size_km, credit, card).tobytes())
             if i + 1 < n:
                 af, bf = a.astype(np.float32), maps[i + 1].astype(np.float32)
                 for k in range(1, fade + 1):
                     t = k / (fade + 1)
                     blend = (af * (1 - t) + bf * t).astype(np.uint8)
                     year = years[i + 1] if t >= 0.5 else years[i]
-                    writer.send(compose(bg, blend, year, (i + t) * step, years, size_km).tobytes())
+                    writer.send(compose(bg, blend, year, (i + t) * step, years, size_km, credit).tobytes())
         writer.close()
     return total / FPS
 
@@ -384,8 +389,8 @@ def render(place, out_dir, hook=None, log=print):
     bg = background(cfg["name"], hook or cfg.get("subtitle", ""), credit)
     video = out_dir / "reel.mp4"
     seed = sum(map(ord, cfg["name"]))
-    duration = write_video(video, maps, years, bg, cfg["size_km"], seed, cfg.get("mood", "calm"))
-    Image.fromarray(compose(bg, maps[-1], years[-1], 1.0, years, cfg["size_km"])).save(
+    duration = write_video(video, maps, years, bg, cfg["size_km"], credit, seed, cfg.get("mood", "calm"))
+    Image.fromarray(compose(bg, maps[-1], years[-1], 1.0, years, cfg["size_km"], credit)).save(
         out_dir / "cover.jpg", quality=92)
     return dict(video=str(video), years=years, duration=duration, source=source)
 

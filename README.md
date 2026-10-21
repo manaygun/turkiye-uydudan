@@ -1,21 +1,21 @@
-# Türkiye uydudan: Instagram Reels autopilot
+# @gecmistenharita: Instagram Reels autopilot
 
-This posts **6 Turkish satellite-timelapse Reels a day** to Instagram, with no manual work after setup.
+This posts **24 satellite-timelapse Reels a day** (one every hour) about places around the world, in Turkish, with no manual work after setup.
 
 Each run does the following:
-1. Picks the next place from [places_tr.json](places_tr.json). The catalog has 50 places in Turkey: drying lakes, dams, airports, bridges and growing cities.
+1. Picks the next place from `places_world.json` (places around the world), or from [places_tr.json](places_tr.json) (50 places in Turkey) until the world catalog exists.
 2. Downloads free satellite images (Landsat 1985→ / Sentinel-2 2016→), one cloud-free composite per year.
 3. Renders a 1080×1920 Reel that plays **oldest map → newest map**. The hook question sits above the map, with a big year counter, a timeline bar, the logo and @gecmistenharita watermark, a "Takip et" card at the end, and music matched to the place's mood.
 4. Writes the Turkish caption: hook question first, then SEO text, a comment CTA, the imagery credit and 5 hashtags.
 5. Posts it as a Reel through the official Instagram API and records it in `state.json`.
 
-It runs on **GitHub Actions** at 08:00, 11:00, 13:30, 17:00, 20:00 and 22:00 Turkey time, so your computer can stay off.
+It runs on **GitHub Actions** every hour at :17, so your computer can stay off.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `places_tr.json` | The place catalog: coordinates, years, mood, two hook questions, story and hashtags |
+| `places_world.json`, `places_tr.json` | Place catalogs: coordinates, years, mood, two hook questions, story and hashtags. The world catalog is used once it exists |
 | `timelapse.py` | Downloads imagery and renders the Reel |
 | `captions.py` | Turkish caption / SEO text |
 | `instagram.py` | Instagram Reels publishing. Instagram downloads the video from a public link, so each run briefly hosts the Reel on GitHub Pages |
@@ -23,7 +23,7 @@ It runs on **GitHub Actions** at 08:00, 11:00, 13:30, 17:00, 20:00 and 22:00 Tur
 | `music.py` | Soundtrack per mood: your own tracks from `music/`, or a generated Turkish-style track |
 | `music/` | Optional folder for your own royalty-free tracks (see `music/README.md`) |
 | `make_logo.py`, `assets/` | The logo: `assets/logo.png` is the profile picture, `assets/logo_mark.png` is the Reel watermark |
-| `.github/workflows/autopilot.yml` | Runs 6 times a day |
+| `.github/workflows/autopilot.yml` | Runs every hour (24 times a day) |
 
 ## One-time setup
 
@@ -60,9 +60,10 @@ cp .env.example .env              # then fill in IG_ACCESS_TOKEN
 ```
 
 ## How long the catalog lasts
-- 50 places, each used twice: round 1 is a close-up with the first hook, round 2 is a wider view with the second hook. That's **100 Reels, about 17 days at 6 a day**.
+- Each place is used twice: round 1 is a close-up with the first hook, round 2 is a wider view with the second hook. At 24 a day, 100 places last about 8 days.
 - If a place has too few cloud-free years, the run skips it and posts the next one.
-- When the catalog runs out, the workflow fails and GitHub emails you. Add more entries to `places_tr.json` in the same format to keep going.
+- When the catalog runs out, the workflow fails and GitHub emails you. Add more entries to `places_world.json` in the same format to keep going.
+- `python autopilot.py status` shows which catalog is in use and how many days are left.
 
 ## Notes
 - Imagery is free. **Credit is required**, and every caption and video already includes it.
