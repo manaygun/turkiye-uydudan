@@ -368,6 +368,16 @@ def render(place, out_dir, hook=None, log=print):
             log(f"  {year}: failed ({e}), skipped")
             continue
         if cov < cfg["min_coverage"]:
+            # cloudy year: try again with three times as many scenes and a looser cloud filter
+            try:
+                more = search(catalog, source, year, season, bbox_ll,
+                              min(cfg["max_cloud"] * 2, 80), cfg["scenes"] * 3)
+                if len(more) > len(items):
+                    items = more
+                    comp, cov = composite(items, source, crs, transform)
+            except Exception as e:
+                log(f"  {year}: retry failed ({e})")
+        if cov < cfg["min_coverage"]:
             log(f"  {year}: only {cov:.0%} clear from {len(items)} scenes, skipped")
             continue
         maps.append(to_rgb8(comp, cfg["max_refl"], cfg["gamma"]))

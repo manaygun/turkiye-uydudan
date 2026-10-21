@@ -129,7 +129,8 @@ def render_next(dry_run):
         if not result:
             state["failed"].append({"id": place["id"], "round": rnd, "at": now(),
                                     "reason": "not enough clear years"})
-            save_state(state)
+            if not dry_run:          # test runs never change progress
+                save_state(state)
             continue
 
         caption = captions.build_caption(place, hook, result["years"], result["source"],
