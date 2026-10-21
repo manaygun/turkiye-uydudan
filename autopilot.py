@@ -6,7 +6,7 @@
   python autopilot.py status         # what's been posted, what's next
   python autopilot.py check          # verify the Instagram token works
 
-Needs IG_USER_ID and IG_ACCESS_TOKEN (environment, or a local .env file).
+Needs IG_ACCESS_TOKEN (environment, or a local .env file); the account id is looked up from it.
 Progress lives in state.json, so each run continues where the last one stopped.
 
 Each place is used twice: round 1 is the close-up view with the first hook,
@@ -101,10 +101,17 @@ def maybe_refresh_token(state, token):
 
 def run(dry_run):
     state = load_state()
-    token, user_id = os.environ.get("IG_ACCESS_TOKEN"), os.environ.get("IG_USER_ID")
+    token, user_id = os.environ.get("IG_ACCESS_TOKEN"), None
     if not dry_run:
-        if not token or not user_id:
-            sys.exit("IG_ACCESS_TOKEN and IG_USER_ID are required (or use --dry-run).")
+        if not token:
+            sys.exit("IG_ACCESS_TOKEN is required (or use --dry-run).")
+        # check the token before spending minutes on a render; the account id comes with it
+        try:
+            me = instagram.whoami(token)
+        except instagram.InstagramError as e:
+            sys.exit(f"Instagram token rejected ({describe_token(token)}): {e}")
+        user_id = str(me["user_id"])
+        print(f"Posting as @{me.get('username')}")
         token = maybe_refresh_token(state, token)
         save_state(state)
 
@@ -182,9 +189,7 @@ def check():
     token = os.environ.get("IG_ACCESS_TOKEN")
     if not token:
         sys.exit("IG_ACCESS_TOKEN is not set.")
-    user_id = os.environ.get("IG_USER_ID", "")
     print(f"IG_ACCESS_TOKEN: {describe_token(token)}")
-    print(f"IG_USER_ID: {len(user_id)} characters, {'all digits' if user_id.isdigit() else 'NOT all digits'}")
     try:
         me = instagram.whoami(token)
     except instagram.InstagramError as e:
@@ -192,9 +197,6 @@ def check():
                  "Generate a new token in the Meta app (Instagram → API setup with Instagram business login → "
                  "Generate token) and store it again in the IG_ACCESS_TOKEN secret.")
     print(f"Token OK: @{me.get('username')} (user_id {me.get('user_id')}, {me.get('account_type')})")
-    if user_id and user_id != str(me.get("user_id")):
-        print(f"Warning: IG_USER_ID is {user_id}, but the token belongs to {me.get('user_id')}. "
-              "Set IG_USER_ID to that number.")
 
 
 def main():

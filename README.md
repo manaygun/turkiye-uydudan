@@ -31,14 +31,13 @@ It runs on **GitHub Actions** at 08:00, 11:00, 13:30, 17:00, 20:00 and 22:00 Tur
 1. In the Instagram app: **Settings → Account type and tools → Switch to professional account** (Creator or Business).
 2. Go to [developers.facebook.com](https://developers.facebook.com) → **My Apps → Create app**. Choose the use case **"Manage messaging & content on Instagram"**, which is the Instagram API with Instagram Login.
 3. In the app, open **Instagram → API setup with Instagram login → Generate access tokens → Add account** and log in with the Instagram account.
-4. Copy the **access token** and the **Instagram user ID** shown there.
+4. Click **Generate token** and copy the **access token**. It is long and starts with `IGAA`. Don't use the app ID or app secret shown higher up the page.
 
 The app can stay in Development mode. Because you're its admin, posting to your own account needs no App Review.
 
 ### 2. GitHub (about 10 minutes)
 1. Create a repository and upload these files. A **public** repo gets unlimited free Actions minutes. A private repo gets 2,000 free minutes a month, which 6 renders a day can use up. Your secrets stay hidden either way.
 2. **Settings → Secrets and variables → Actions → New repository secret**. Add:
-   - `IG_USER_ID`: the Instagram user ID
    - `IG_ACCESS_TOKEN`: the access token
    - `GH_PAT`: a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) for this repository only, with the permission **Secrets: Read and write**. The autopilot needs it to save the refreshed Instagram token every week. Without it, the Instagram token expires after 60 days.
 3. Open the **Actions** tab, then **Instagram autopilot → Run workflow**, and pick a **mode**:
@@ -52,7 +51,7 @@ The app can stay in Development mode. Because you're its admin, posting to your 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env              # then fill in IG_USER_ID and IG_ACCESS_TOKEN
+cp .env.example .env              # then fill in IG_ACCESS_TOKEN
 .venv/bin/python autopilot.py check            # verifies the token
 .venv/bin/python autopilot.py run --dry-run    # renders the next Reel, posts nothing
 .venv/bin/python autopilot.py run              # renders and posts
