@@ -18,16 +18,24 @@ on:
         default: post
 
 permissions:
-  contents: write
+  contents: write     # commit state.json
+  pages: write        # host the Reel so Instagram can download it
+  id-token: write
 
 concurrency:
   group: autopilot
   cancel-in-progress: false
 
+env:
+  # scheduled runs have no inputs: they post
+  MODE: ${{ inputs.mode || 'post' }}
+
 jobs:
   post:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    environment:
+      name: github-pages
     steps:
       - uses: actions/checkout@v4
 
@@ -41,17 +49,42 @@ jobs:
           sudo apt-get install -y -qq fonts-dejavu-core
           pip install -r requirements.txt
 
-      - name: Render and post
+      - name: Check Instagram token
+        if: env.MODE != 'dry-run'
         env:
-          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        run: python autopilot.py check
+
+      - name: Render
+        if: env.MODE != 'check'
+        run: python autopilot.py render ${{ env.MODE == 'dry-run' && '--dry-run' || '' }}
+
+      - name: Stage the Reel for GitHub Pages
+        if: env.MODE == 'post'
+        run: |
+          mkdir -p site
+          cp work/pending/reel.mp4 "site/reel-${{ github.run_id }}.mp4"
+          echo "@gecmistenharita" > site/index.html
+
+      - uses: actions/configure-pages@v5
+        if: env.MODE == 'post'
+
+      - uses: actions/upload-pages-artifact@v3
+        if: env.MODE == 'post'
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: pages
+        if: env.MODE == 'post'
+        uses: actions/deploy-pages@v4
+
+      - name: Publish to Instagram
+        if: env.MODE == 'post'
+        env:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          case "${{ inputs.mode }}" in
-            dry-run) python autopilot.py run --dry-run ;;
-            check)   python autopilot.py check ;;
-            *)       python autopilot.py run ;;
-          esac
+        run: python autopilot.py publish --video-url "${{ steps.pages.outputs.page_url }}reel-${{ github.run_id }}.mp4"
 
       - name: Save progress
         if: always()
@@ -59,7 +92,7 @@ jobs:
           git config user.name "autopilot"
           git config user.email "autopilot@users.noreply.github.com"
           git add state.json 2>/dev/null || true
-          git diff --cached --quiet || (git commit -m "autopilot: update state" && git push)
+          git diff --cached --quiet || (git commit -m "autopilot: update state" && git pull --rebase && git push)
 
       - name: Keep the Reel as a downloadable artifact
         if: always()

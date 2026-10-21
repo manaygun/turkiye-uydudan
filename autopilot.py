@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Pick the next place, render its Reel, and post it to Instagram. Run once per post.
 
-  python autopilot.py run            # render + post the next place
-  python autopilot.py run --dry-run  # render + write caption, don't post
-  python autopilot.py status         # what's been posted, what's next
-  python autopilot.py check          # verify the Instagram token works
+  python autopilot.py render                 # render the next place into work/pending/
+  python autopilot.py render --dry-run       # render + print caption, nothing saved for posting
+  python autopilot.py publish --video-url U  # post work/pending/ (Instagram downloads the video from U)
+  python autopilot.py status                 # what's been posted, what's next
+  python autopilot.py check                  # verify the Instagram token works
+
+Instagram's API (Instagram Login) only accepts a public video URL, so the GitHub
+workflow puts reel.mp4 on GitHub Pages between `render` and `publish`.
 
 Needs IG_ACCESS_TOKEN (environment, or a local .env file); the account id is looked up from it.
 Progress lives in state.json, so each run continues where the last one stopped.
@@ -17,9 +21,13 @@ import argparse
 import datetime as dt
 import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+import requests
 
 import captions
 import instagram
@@ -29,6 +37,7 @@ ROOT = Path(__file__).parent
 STATE = ROOT / "state.json"
 ENV_FILE = ROOT / ".env"
 WORK = ROOT / "work"
+PENDING = WORK / "pending"
 ROUNDS = 2
 WIDE_ZOOM = 2.2
 MAX_ATTEMPTS = 3          # places to try per run if one has too few clear years
@@ -99,22 +108,9 @@ def maybe_refresh_token(state, token):
     return new
 
 
-def run(dry_run):
+def render_next(dry_run):
+    """Render the next place into work/pending/ (reel.mp4, caption.txt, pending.json)."""
     state = load_state()
-    token, user_id = os.environ.get("IG_ACCESS_TOKEN"), None
-    if not dry_run:
-        if not token:
-            sys.exit("IG_ACCESS_TOKEN is required (or use --dry-run).")
-        # check the token before spending minutes on a render; the account id comes with it
-        try:
-            me = instagram.whoami(token)
-        except instagram.InstagramError as e:
-            sys.exit(f"Instagram token rejected ({describe_token(token)}): {e}")
-        user_id = str(me["user_id"])
-        print(f"Posting as @{me.get('username')}")
-        token = maybe_refresh_token(state, token)
-        save_state(state)
-
     attempts = 0
     for place, rnd, hook in queue(state):
         if attempts >= MAX_ATTEMPTS:
@@ -133,24 +129,60 @@ def run(dry_run):
                                          index=len(state["posted"]))
         (out / "caption.txt").write_text(caption)
         print(f"  video {result['duration']:.1f}s, {len(result['years'])} years")
-
         if dry_run:
             print(f"\n--- caption ---\n{caption}\n---------------\nDry run: not posted. Files in {out}")
             return
 
-        media_id, permalink = instagram.publish_reel(
-            user_id, token, result["video"], caption,
-            thumb_offset_ms=(result["duration"] - 1.0) * 1000)
-        state["posted"].append({"id": place["id"], "round": rnd, "at": now(),
-                                "media_id": media_id, "permalink": permalink,
-                                "years": [result["years"][0], result["years"][-1]]})
-        save_state(state)
-        print(f"  ✅ posted: {permalink or media_id}")
+        PENDING.mkdir(parents=True, exist_ok=True)
+        shutil.copy(result["video"], PENDING / "reel.mp4")
+        (PENDING / "pending.json").write_text(json.dumps({
+            "id": place["id"], "round": rnd, "caption": caption, "duration": result["duration"],
+            "years": [result["years"][0], result["years"][-1]],
+        }, ensure_ascii=False, indent=2))
+        print(f"  ready to post: {PENDING / 'reel.mp4'}")
         return
 
     if attempts == 0:
         sys.exit("The place catalog is used up. Add more places to places_tr.json.")
     sys.exit(f"No place could be rendered in {attempts} attempts; will try the next ones on the next run.")
+
+
+def wait_until_online(url, minutes=3):
+    """GitHub Pages can take a moment after deploying; Instagram must be able to download the file."""
+    deadline = time.time() + minutes * 60
+    while time.time() < deadline:
+        try:
+            if requests.head(url, timeout=20, allow_redirects=True).status_code == 200:
+                return
+        except requests.RequestException:
+            pass
+        time.sleep(10)
+    sys.exit(f"Video never became reachable at {url}")
+
+
+def publish(video_url):
+    """Post work/pending/ as a Reel; Instagram downloads the video from video_url."""
+    state = load_state()
+    token = os.environ.get("IG_ACCESS_TOKEN")
+    if not token:
+        sys.exit("IG_ACCESS_TOKEN is required.")
+    pending = json.loads((PENDING / "pending.json").read_text())
+    try:
+        me = instagram.whoami(token)
+    except instagram.InstagramError as e:
+        sys.exit(f"Instagram token rejected ({describe_token(token)}): {e}")
+    print(f"Posting {pending['id']} as @{me.get('username')}")
+    token = maybe_refresh_token(state, token)
+    save_state(state)
+
+    wait_until_online(video_url)
+    media_id, permalink = instagram.publish_reel(
+        str(me["user_id"]), token, video_url, pending["caption"],
+        thumb_offset_ms=(pending["duration"] - 1.0) * 1000)
+    state["posted"].append({"id": pending["id"], "round": pending["round"], "at": now(),
+                            "media_id": media_id, "permalink": permalink, "years": pending["years"]})
+    save_state(state)
+    print(f"✅ posted: {permalink or media_id}")
 
 
 def status():
@@ -204,13 +236,17 @@ def main():
     clean_secrets()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run")
-    r.add_argument("--dry-run", action="store_true")
+    r = sub.add_parser("render", help="render the next place, ready to post")
+    r.add_argument("--dry-run", action="store_true", help="render and print the caption only")
+    pub = sub.add_parser("publish", help="post the rendered Reel")
+    pub.add_argument("--video-url", required=True, help="public URL where Instagram can download reel.mp4")
     sub.add_parser("status")
     sub.add_parser("check")
     args = p.parse_args()
-    if args.cmd == "run":
-        run(args.dry_run)
+    if args.cmd == "render":
+        render_next(args.dry_run)
+    elif args.cmd == "publish":
+        publish(args.video_url)
     elif args.cmd == "status":
         status()
     else:

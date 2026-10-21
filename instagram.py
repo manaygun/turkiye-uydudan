@@ -1,7 +1,7 @@
 """Publish Reels through the Instagram API with Instagram Login.
 
-Flow: create a resumable REELS container -> upload the file to rupload.facebook.com
--> wait until Instagram finishes processing -> publish. No public video URL needed.
+Flow: create a REELS container pointing at a public video URL -> Instagram downloads and
+processes it -> publish. (Direct/resumable uploads are rejected for Instagram Login tokens.)
 """
 
 import os
@@ -33,11 +33,11 @@ def whoami(token):
         "fields": "user_id,username,account_type", "access_token": token}, timeout=30))
 
 
-def publish_reel(user_id, token, video_path, caption, thumb_offset_ms=None, log=print):
-    """Returns (media_id, permalink)."""
+def publish_reel(user_id, token, video_url, caption, thumb_offset_ms=None, log=print):
+    """Instagram downloads the video from video_url. Returns (media_id, permalink)."""
     params = {
         "media_type": "REELS",
-        "upload_type": "resumable",
+        "video_url": video_url,
         "caption": caption,
         "share_to_feed": "true",
         "access_token": token,
@@ -45,14 +45,7 @@ def publish_reel(user_id, token, video_path, caption, thumb_offset_ms=None, log=
     if thumb_offset_ms is not None:
         params["thumb_offset"] = str(int(thumb_offset_ms))
     container = _check(requests.post(f"{BASE}/{user_id}/media", data=params, timeout=60))["id"]
-    log(f"  container {container} created, uploading…")
-
-    size = os.path.getsize(video_path)
-    with open(video_path, "rb") as f:
-        _check(requests.post(
-            f"https://rupload.facebook.com/ig-api-upload/{API_VERSION}/{container}",
-            headers={"Authorization": f"OAuth {token}", "offset": "0", "file_size": str(size)},
-            data=f, timeout=600))
+    log(f"  container {container} created, Instagram is downloading and processing the video…")
 
     for _ in range(90):            # up to ~15 min of processing
         status = _check(requests.get(f"{BASE}/{container}", params={
