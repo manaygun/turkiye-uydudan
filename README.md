@@ -1,0 +1,64 @@
+# Türkiye uydudan: Instagram Reels autopilot
+
+This posts **6 Turkish satellite-timelapse Reels a day** to Instagram, with no manual work after setup.
+
+Each run does the following:
+1. Picks the next place from [places_tr.json](places_tr.json). The catalog has 50 places in Turkey: drying lakes, dams, airports, bridges and growing cities.
+2. Downloads free satellite images (Landsat 1985→ / Sentinel-2 2016→), one cloud-free composite per year.
+3. Renders a 1080×1920 Reel that plays **oldest map → newest map**. The hook question sits above the map, with a big year counter, a timeline bar and a soft synthesized music pad.
+4. Writes the Turkish caption: hook question first, then SEO text, a comment CTA, the imagery credit and 5 hashtags.
+5. Posts it as a Reel through the official Instagram API and records it in `state.json`.
+
+It runs on **GitHub Actions** at 08:00, 11:00, 13:30, 17:00, 20:00 and 22:00 Turkey time, so your computer can stay off.
+
+## Files
+
+| File | What it is |
+|---|---|
+| `places_tr.json` | The place catalog: coordinates, years, two hook questions, story and hashtags |
+| `timelapse.py` | Downloads imagery and renders the Reel |
+| `captions.py` | Turkish caption / SEO text |
+| `instagram.py` | Instagram Reels publishing (resumable upload, no video hosting needed) |
+| `autopilot.py` | Picks the next place, renders it, posts it, saves progress |
+| `.github/workflows/autopilot.yml` | Runs 6 times a day |
+
+## One-time setup
+
+### 1. Instagram (about 10 minutes)
+1. In the Instagram app: **Settings → Account type and tools → Switch to professional account** (Creator or Business).
+2. Go to [developers.facebook.com](https://developers.facebook.com) → **My Apps → Create app**. Choose the use case **"Manage messaging & content on Instagram"**, which is the Instagram API with Instagram Login.
+3. In the app, open **Instagram → API setup with Instagram login → Generate access tokens → Add account** and log in with the Instagram account.
+4. Copy the **access token** and the **Instagram user ID** shown there.
+
+The app can stay in Development mode. Because you're its admin, posting to your own account needs no App Review.
+
+### 2. GitHub (about 10 minutes)
+1. Create a repository and upload these files. A **public** repo gets unlimited free Actions minutes. A private repo gets 2,000 free minutes a month, which 6 renders a day can use up. Your secrets stay hidden either way.
+2. **Settings → Secrets and variables → Actions → New repository secret**. Add:
+   - `IG_USER_ID`: the Instagram user ID
+   - `IG_ACCESS_TOKEN`: the access token
+   - `GH_PAT`: a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) for this repository only, with the permission **Secrets: Read and write**. The autopilot needs it to save the refreshed Instagram token every week. Without it, the Instagram token expires after 60 days.
+3. Open the **Actions** tab, then **Instagram autopilot → Run workflow**. Tick **dry run** for the first try. Download the Reel from the run's artifacts and check it.
+4. Run it once more without dry run to post the first Reel. After that, the schedule takes over.
+
+## Running on your computer instead
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env              # then fill in IG_USER_ID and IG_ACCESS_TOKEN
+.venv/bin/python autopilot.py check            # verifies the token
+.venv/bin/python autopilot.py run --dry-run    # renders the next Reel, posts nothing
+.venv/bin/python autopilot.py run              # renders and posts
+.venv/bin/python autopilot.py status           # what's posted and what's next
+```
+
+## How long the catalog lasts
+- 50 places, each used twice: round 1 is a close-up with the first hook, round 2 is a wider view with the second hook. That's **100 Reels, about 17 days at 6 a day**.
+- If a place has too few cloud-free years, the run skips it and posts the next one.
+- When the catalog runs out, the workflow fails and GitHub emails you. Add more entries to `places_tr.json` in the same format to keep going.
+
+## Notes
+- Imagery is free. **Credit is required**, and every caption and video already includes it.
+- Instagram's API can't add trending music, so the Reel uses its own generated pad. Hashtags are capped at 5.
+- A full 40-year render takes about 5–15 minutes depending on network speed.

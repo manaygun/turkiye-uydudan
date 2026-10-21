@@ -1,0 +1,8 @@
+pystac-client
+planetary-computer
+rasterio
+numpy
+pillow
+imageio-ffmpeg
+pyproj
+requests
