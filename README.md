@@ -41,8 +41,11 @@ The app can stay in Development mode. Because you're its admin, posting to your 
    - `IG_USER_ID`: the Instagram user ID
    - `IG_ACCESS_TOKEN`: the access token
    - `GH_PAT`: a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) for this repository only, with the permission **Secrets: Read and write**. The autopilot needs it to save the refreshed Instagram token every week. Without it, the Instagram token expires after 60 days.
-3. Open the **Actions** tab, then **Instagram autopilot → Run workflow**. Tick **dry run** for the first try. Download the Reel from the run's artifacts and check it.
-4. Run it once more without dry run to post the first Reel. After that, the schedule takes over.
+3. Open the **Actions** tab, then **Instagram autopilot → Run workflow**, and pick a **mode**:
+   - **check**: tests the Instagram token in about a minute, no rendering
+   - **dry-run**: renders a Reel without posting. Download it from the run's artifacts
+   - **post**: renders and posts. This is also what the schedule does
+4. After the first successful **post**, the schedule takes over.
 
 ## Running on your computer instead
 

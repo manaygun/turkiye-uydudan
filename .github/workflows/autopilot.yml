@@ -11,10 +11,11 @@ on:
     - cron: "0 19 * * *"
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Render only, don't post"
-        type: boolean
-        default: false
+      mode:
+        description: "post = render and post, dry-run = render only, check = test the Instagram token"
+        type: choice
+        options: [post, dry-run, check]
+        default: post
 
 permissions:
   contents: write
@@ -45,7 +46,12 @@ jobs:
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
-        run: python autopilot.py run ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          case "${{ inputs.mode }}" in
+            dry-run) python autopilot.py run --dry-run ;;
+            check)   python autopilot.py check ;;
+            *)       python autopilot.py run ;;
+          esac
 
       - name: Save progress
         if: always()

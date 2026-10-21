@@ -157,18 +157,49 @@ def status():
         print(f"  … next: {place['id']} r{rnd}")
 
 
+def clean_secrets():
+    """Undo common copy-paste damage: spaces, line breaks, quotes, a pasted 'NAME=' prefix."""
+    for name in ("IG_ACCESS_TOKEN", "IG_USER_ID"):
+        raw = os.environ.get(name)
+        if raw is None:
+            continue
+        value = "".join(raw.split()).strip("'\"")
+        if value.startswith(f"{name}="):
+            value = value[len(name) + 1:]
+        if value != raw:
+            print(f"Note: cleaned extra spaces/quotes from {name}.")
+        os.environ[name] = value
+
+
+def describe_token(token):
+    """Shape of the token without revealing it."""
+    kind = {"IG": "Instagram token (correct type)", "EA": "Facebook token (wrong type for this API)",
+            "gh": "GitHub token (wrong secret pasted)"}.get(token[:2], "unknown type")
+    return f"length {len(token)}, starts with '{token[:2]}' → {kind}"
+
+
 def check():
     token = os.environ.get("IG_ACCESS_TOKEN")
     if not token:
         sys.exit("IG_ACCESS_TOKEN is not set.")
-    me = instagram.whoami(token)
+    user_id = os.environ.get("IG_USER_ID", "")
+    print(f"IG_ACCESS_TOKEN: {describe_token(token)}")
+    print(f"IG_USER_ID: {len(user_id)} characters, {'all digits' if user_id.isdigit() else 'NOT all digits'}")
+    try:
+        me = instagram.whoami(token)
+    except instagram.InstagramError as e:
+        sys.exit(f"Token rejected by Instagram: {e}\n"
+                 "Generate a new token in the Meta app (Instagram → API setup with Instagram business login → "
+                 "Generate token) and store it again in the IG_ACCESS_TOKEN secret.")
     print(f"Token OK: @{me.get('username')} (user_id {me.get('user_id')}, {me.get('account_type')})")
-    if os.environ.get("IG_USER_ID") and os.environ["IG_USER_ID"] != str(me.get("user_id")):
-        print(f"Warning: IG_USER_ID is {os.environ['IG_USER_ID']}, token belongs to {me.get('user_id')}")
+    if user_id and user_id != str(me.get("user_id")):
+        print(f"Warning: IG_USER_ID is {user_id}, but the token belongs to {me.get('user_id')}. "
+              "Set IG_USER_ID to that number.")
 
 
 def main():
     load_env()
+    clean_secrets()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
