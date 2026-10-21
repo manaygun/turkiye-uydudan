@@ -21,7 +21,6 @@ import sys
 import tempfile
 import textwrap
 import warnings
-import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -36,12 +35,16 @@ from rasterio.enums import Resampling
 from rasterio.transform import from_bounds
 from rasterio.vrt import WarpedVRT
 
+import music
+
 ROOT = Path(__file__).parent
 STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 W, H = 1080, 1920          # Reels size
 MAP = 1080                 # square map, full width
 MAP_TOP = 470              # leaves room for the hook above; Reels UI covers the bottom ~350 px
 FPS = 30
+HANDLE = "@gecmistenharita"
+LOGO_MARK = ROOT / "assets" / "logo_mark.png"
 
 GDAL_ENV = dict(
     GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
@@ -215,14 +218,34 @@ def nice_scale(size_km):
     return exp
 
 
+_watermark = None
+
+
+def watermark():
+    """Logo + handle, drawn once and reused on every frame."""
+    global _watermark
+    if _watermark is None:
+        f = font(34)
+        text_w = int(f.getlength(HANDLE))
+        logo = 76
+        wm = Image.new("RGBA", (logo + 14 + text_w + 12, logo + 8), (0, 0, 0, 0))
+        if LOGO_MARK.exists():
+            mark = Image.open(LOGO_MARK).convert("RGBA").resize((logo, logo), Image.LANCZOS)
+            wm.alpha_composite(mark, (0, 4))
+        ImageDraw.Draw(wm).text((logo + 12, wm.height // 2), HANDLE, font=f, fill="white",
+                                stroke_width=3, stroke_fill=(0, 0, 0), anchor="lm")
+        _watermark = wm
+    return _watermark
+
+
 def background(title, hook, credit):
     """Everything that stays the same in every frame."""
     canvas = Image.new("RGB", (W, H), (12, 14, 18))
     d = ImageDraw.Draw(canvas)
-    d.text((W // 2, 200), title, font=font(58), fill="white", anchor="mm")
     lines = textwrap.wrap(hook, width=30)[:3]
+    d.text((W // 2, 200 if len(lines) < 3 else 160), title, font=font(58), fill="white", anchor="mm")
     f = font(52)
-    y = 300 if len(lines) < 3 else 272
+    y = 300 if len(lines) < 3 else 262
     for line in lines:
         d.text((W // 2, y), line, font=f, fill=(255, 214, 92), anchor="mm")
         y += 64
@@ -231,7 +254,7 @@ def background(title, hook, credit):
     return canvas
 
 
-def compose(bg, map_img, year, progress, years, size_km):
+def compose(bg, map_img, year, progress, years, size_km, end_card=False):
     canvas = bg.copy()
     canvas.paste(Image.fromarray(map_img), (0, MAP_TOP))
     d = ImageDraw.Draw(canvas)
@@ -248,6 +271,20 @@ def compose(bg, map_img, year, progress, years, size_km):
     d.text((x0 + px / 2, y0 - 22), f"{km:g} km", font=font(30), fill="white",
            stroke_width=3, stroke_fill="black", anchor="mm")
 
+    # watermark, bottom-right of the map
+    wm = watermark()
+    canvas.paste(wm, (W - wm.width - 30, MAP_TOP + MAP - wm.height - 24), wm)
+
+    # follow card while the last (newest) year is held
+    if end_card:
+        f = font(46)
+        label = f"Takip et → {HANDLE}"
+        tw = f.getlength(label)
+        cy = MAP_TOP + MAP - 190
+        d.rounded_rectangle([W / 2 - tw / 2 - 34, cy - 44, W / 2 + tw / 2 + 34, cy + 44],
+                            radius=44, fill=(255, 214, 92))
+        d.text((W / 2, cy), label, font=f, fill=(12, 14, 18), anchor="mm")
+
     # timeline under the map: oldest -> newest
     ty, tx0, tx1 = MAP_TOP + MAP + 55, 140, W - 140
     d.line([tx0, ty, tx1, ty], fill=(70, 76, 88), width=6)
@@ -262,30 +299,7 @@ def compose(bg, map_img, year, progress, years, size_km):
 
 # ---------------------------------------------------------------- audio + video
 
-def ambient_wav(path, seconds, seed=0):
-    """A soft synthesized pad, so Reels aren't silent and no music licence is needed."""
-    sr = 44100
-    t = np.arange(int(sr * seconds)) / sr
-    rng = np.random.default_rng(seed)
-    chords = [[110.0, 164.81, 220.0, 277.18], [98.0, 146.83, 196.0, 246.94],
-              [87.31, 130.81, 174.61, 220.0], [103.83, 155.56, 207.65, 261.63]]
-    out = np.zeros((len(t), 2))
-    for f in chords[seed % len(chords)]:
-        for ch, detune in ((0, 0.997), (1, 1.003)):
-            swell = 0.6 + 0.4 * np.sin(2 * np.pi * rng.uniform(0.04, 0.12) * t + rng.uniform(0, 6.3))
-            out[:, ch] += np.sin(2 * np.pi * f * detune * t + rng.uniform(0, 6.3)) * swell
-            out[:, ch] += 0.15 * np.sin(4 * np.pi * f * detune * t) * swell
-    env = np.minimum(1, t / 1.5) * np.minimum(1, (seconds - t) / 2.0).clip(0)
-    out *= env[:, None]
-    out = out / np.abs(out).max() * 0.3
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(2)
-        w.setsampwidth(2)
-        w.setframerate(sr)
-        w.writeframes((out * 32767).astype(np.int16).tobytes())
-
-
-def write_video(path, maps, years, bg, size_km, seed):
+def write_video(path, maps, years, bg, size_km, seed, mood="calm"):
     n = len(maps)
     hold = max(9, min(24, int(18 * FPS / n)))       # aim for ~20-30 s total
     fade = max(5, hold // 2)
@@ -293,20 +307,23 @@ def write_video(path, maps, years, bg, size_km, seed):
     total = sum(end_hold if i == n - 1 else hold + fade for i in range(n))
 
     with tempfile.TemporaryDirectory() as tmp:
-        wav = Path(tmp) / "pad.wav"
-        ambient_wav(wav, total / FPS + 0.5, seed)
+        seconds = total / FPS
+        audio = music.soundtrack(mood, seconds + 0.5, seed, tmp)
         writer = imageio_ffmpeg.write_frames(
             str(path), (W, H), fps=FPS, codec="libx264", quality=None, macro_block_size=1,
-            audio_path=str(wav), audio_codec="aac",
+            audio_path=str(audio), audio_codec="aac",
             output_params=["-crf", "20", "-preset", "medium", "-movflags", "+faststart",
-                           "-shortest", "-b:a", "128k"],
+                           "-af", f"afade=t=in:d=0.5,afade=t=out:st={seconds - 2:.2f}:d=2",
+                           "-shortest", "-b:a", "160k"],
         )
         writer.send(None)
         step = 1 / (n - 1)
         for i in range(n):
             a = maps[i]
-            for _ in range(end_hold if i == n - 1 else hold):
-                writer.send(compose(bg, a, years[i], i * step, years, size_km).tobytes())
+            last = i == n - 1
+            for k in range(end_hold if last else hold):
+                card = last and k >= FPS // 2          # show the follow card half a second in
+                writer.send(compose(bg, a, years[i], i * step, years, size_km, card).tobytes())
             if i + 1 < n:
                 af, bf = a.astype(np.float32), maps[i + 1].astype(np.float32)
                 for k in range(1, fade + 1):
@@ -367,7 +384,7 @@ def render(place, out_dir, hook=None, log=print):
     bg = background(cfg["name"], hook or cfg.get("subtitle", ""), credit)
     video = out_dir / "reel.mp4"
     seed = sum(map(ord, cfg["name"]))
-    duration = write_video(video, maps, years, bg, cfg["size_km"], seed)
+    duration = write_video(video, maps, years, bg, cfg["size_km"], seed, cfg.get("mood", "calm"))
     Image.fromarray(compose(bg, maps[-1], years[-1], 1.0, years, cfg["size_km"])).save(
         out_dir / "cover.jpg", quality=92)
     return dict(video=str(video), years=years, duration=duration, source=source)

@@ -5,7 +5,7 @@ This posts **6 Turkish satellite-timelapse Reels a day** to Instagram, with no m
 Each run does the following:
 1. Picks the next place from [places_tr.json](places_tr.json). The catalog has 50 places in Turkey: drying lakes, dams, airports, bridges and growing cities.
 2. Downloads free satellite images (Landsat 1985→ / Sentinel-2 2016→), one cloud-free composite per year.
-3. Renders a 1080×1920 Reel that plays **oldest map → newest map**. The hook question sits above the map, with a big year counter, a timeline bar and a soft synthesized music pad.
+3. Renders a 1080×1920 Reel that plays **oldest map → newest map**. The hook question sits above the map, with a big year counter, a timeline bar, the logo and @gecmistenharita watermark, a "Takip et" card at the end, and music matched to the place's mood.
 4. Writes the Turkish caption: hook question first, then SEO text, a comment CTA, the imagery credit and 5 hashtags.
 5. Posts it as a Reel through the official Instagram API and records it in `state.json`.
 
@@ -15,11 +15,14 @@ It runs on **GitHub Actions** at 08:00, 11:00, 13:30, 17:00, 20:00 and 22:00 Tur
 
 | File | What it is |
 |---|---|
-| `places_tr.json` | The place catalog: coordinates, years, two hook questions, story and hashtags |
+| `places_tr.json` | The place catalog: coordinates, years, mood, two hook questions, story and hashtags |
 | `timelapse.py` | Downloads imagery and renders the Reel |
 | `captions.py` | Turkish caption / SEO text |
 | `instagram.py` | Instagram Reels publishing (resumable upload, no video hosting needed) |
 | `autopilot.py` | Picks the next place, renders it, posts it, saves progress |
+| `music.py` | Soundtrack per mood: your own tracks from `music/`, or a generated Turkish-style track |
+| `music/` | Optional folder for your own royalty-free tracks (see `music/README.md`) |
+| `make_logo.py`, `assets/` | The logo: `assets/logo.png` is the profile picture, `assets/logo_mark.png` is the Reel watermark |
 | `.github/workflows/autopilot.yml` | Runs 6 times a day |
 
 ## One-time setup
@@ -60,5 +63,7 @@ cp .env.example .env              # then fill in IG_USER_ID and IG_ACCESS_TOKEN
 
 ## Notes
 - Imagery is free. **Credit is required**, and every caption and video already includes it.
-- Instagram's API can't add trending music, so the Reel uses its own generated pad. Hashtags are capped at 5.
+- Instagram's API can't add trending or licensed music. Each Reel gets a generated soundtrack for its mood (saz-like strings on makam scales, darbuka rhythms), or one of your own royalty-free tracks from `music/<mood>/`. Moods: calm (drying lakes), water (dams, deltas), city, build (airports, bridges, ports), drama (fires, mines), mountain.
+- Hashtags are capped at 5.
+- The Instagram API can't change the profile picture. Upload `assets/logo.png` yourself.
 - A full 40-year render takes about 5–15 minutes depending on network speed.
