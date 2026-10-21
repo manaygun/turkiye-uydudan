@@ -12,6 +12,13 @@
       ]
     }
   ],
-  "failed": [],
+  "failed": [
+    {
+      "id": "istanbul-havalimani",
+      "round": 1,
+      "at": "2026-10-21T21:15:12+00:00",
+      "reason": "not enough clear years"
+    }
+  ],
   "token_refreshed_at": "2026-10-21T20:56:19+00:00"
 }
