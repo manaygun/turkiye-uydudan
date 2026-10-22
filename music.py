@@ -31,6 +31,7 @@ MOODS = {
     "build":    dict(scale="rast",    tonic=60, bpm=112, perc="drive",   density=0.7),
     "drama":    dict(scale="hicaz",   tonic=57, bpm=70,  perc="toms",    density=0.4),
     "mountain": dict(scale="huseyni", tonic=64, bpm=66,  perc=None,      density=0.35),
+    "tech":     dict(scale="rast",    tonic=60, bpm=96,  perc="soft",    density=0.5),
 }
 
 

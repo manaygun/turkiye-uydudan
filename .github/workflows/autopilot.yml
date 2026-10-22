@@ -2,8 +2,8 @@ name: Instagram autopilot
 
 on:
   schedule:
-    # 24 Reels a day: every hour at :17 (off the top of the hour, when GitHub's scheduler is busiest)
-    - cron: "17 * * * *"
+    # 4 Reels a day (UTC): 08:17, 13:17, 18:17, 23:17. Off the top of the hour, when GitHub's scheduler is busiest
+    - cron: "17 8,13,18,23 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -24,6 +24,8 @@ concurrency:
 env:
   # scheduled runs have no inputs: they post
   MODE: ${{ inputs.mode || 'post' }}
+  # explainers = animated English explainers; satellite = satellite timelapses
+  CONTENT: explainers
 
 jobs:
   post:
@@ -41,8 +43,16 @@ jobs:
 
       - name: Install
         run: |
-          sudo apt-get install -y -qq fonts-dejavu-core
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-dejavu-core fonts-noto-color-emoji espeak-ng
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
+
+      - name: Cache the voice model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: kokoro-82m-v1
 
       - name: Check Instagram token
         if: env.MODE != 'dry-run'

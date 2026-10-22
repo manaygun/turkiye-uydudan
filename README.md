@@ -1,6 +1,6 @@
 # @gecmistenharita: Instagram Reels autopilot
 
-This posts **24 satellite-timelapse Reels a day** (one every hour) about places around the world, in Turkish, with no manual work after setup.
+This posts **4 animated, narrated English explainer Reels a day** ("how does X work?") with no manual work after setup. The earlier satellite-timelapse mode is still available (set `CONTENT: satellite` in the workflow).
 
 Each run does the following:
 1. Picks the next place from `places_world.json` (places around the world), or from [places_tr.json](places_tr.json) (50 places in Turkey) until the world catalog exists.
@@ -9,7 +9,7 @@ Each run does the following:
 4. Writes the Turkish caption: hook question first, then SEO text, a comment CTA, the imagery credit and 5 hashtags.
 5. Posts it as a Reel through the official Instagram API and records it in `state.json`.
 
-It runs on **GitHub Actions** every hour at :17, so your computer can stay off.
+It runs on **GitHub Actions** at 08:17, 13:17, 18:17 and 23:17 UTC, so your computer can stay off.
 
 ## Files
 
@@ -23,7 +23,10 @@ It runs on **GitHub Actions** every hour at :17, so your computer can stay off.
 | `music.py` | Soundtrack per mood: your own tracks from `music/`, or a generated Turkish-style track |
 | `music/` | Optional folder for your own royalty-free tracks (see `music/README.md`) |
 | `make_logo.py`, `assets/` | The logo: `assets/logo.png` is the profile picture, `assets/logo_mark.png` is the Reel watermark |
-| `.github/workflows/autopilot.yml` | Runs every hour (24 times a day) |
+| `.github/workflows/autopilot.yml` | Runs 4 times a day |
+| `explainers.json` | Explainer scripts: title, hook, narration per beat, what each beat shows, caption, hashtags |
+| `explain.py` | Animation engine: renders beats (title, split, merge, focus, flow, stat, list, compare), word-by-word subtitles, logo and outro |
+| `tts.py` | English voiceover with word timings (Kokoro, open source, runs on the GitHub runner) |
 
 ## One-time setup
 

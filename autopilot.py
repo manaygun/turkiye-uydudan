@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Pick the next place, render its Reel, and post it to Instagram. Run once per post.
+"""Pick the next Reel, render it, and post it to Instagram. Run once per post.
+
+CONTENT (environment) chooses what is posted:
+  explainers  (default) animated, narrated English explainers from explainers.json
+  satellite   satellite timelapses from places_world.json / places_tr.json
 
   python autopilot.py render                 # render the next place into work/pending/
   python autopilot.py render --dry-run       # render + print caption, nothing saved for posting
@@ -13,8 +17,8 @@ workflow puts reel.mp4 on GitHub Pages between `render` and `publish`.
 Needs IG_ACCESS_TOKEN (environment, or a local .env file); the account id is looked up from it.
 Progress lives in state.json, so each run continues where the last one stopped.
 
-Each place is used twice: round 1 is the close-up view with the first hook,
-round 2 is a wider view with the second hook.
+Satellite places are used twice: round 1 is the close-up view with the first hook,
+round 2 is a wider view with the second hook. Explainer topics are used once.
 """
 
 import argparse
@@ -31,7 +35,6 @@ import requests
 
 import captions
 import instagram
-from timelapse import render
 
 ROOT = Path(__file__).parent
 STATE = ROOT / "state.json"
@@ -42,7 +45,8 @@ ROUNDS = 2
 WIDE_ZOOM = 2.2
 MAX_ATTEMPTS = 3          # places to try per run if one has too few clear years
 REFRESH_EVERY_DAYS = 7
-POSTS_PER_DAY = 24        # matches the hourly schedule in .github/workflows/autopilot.yml
+POSTS_PER_DAY = 4         # matches the schedule in .github/workflows/autopilot.yml
+CONTENT = os.environ.get("CONTENT", "explainers")
 
 
 def load_env():
@@ -88,6 +92,32 @@ def queue(state):
             yield place, rnd, hook
 
 
+def next_jobs(state):
+    """What to post next, in order. Each job knows how to render itself and write its caption."""
+    done = {(p["id"], p["round"]) for p in state["posted"] + state["failed"]}
+    if CONTENT == "explainers":
+        for topic in json.loads((ROOT / "explainers.json").read_text()):
+            if (topic["id"], 1) in done:
+                continue
+
+            def make(out, topic=topic):
+                import explain
+                result = explain.render(topic, out)
+                return result, captions.build_explainer_caption(topic, index=len(state["posted"]))
+            yield dict(id=topic["id"], round=1, label=topic["title"], make=make)
+        return
+
+    for place, rnd, hook in queue(state):
+        def make(out, place=place, rnd=rnd, hook=hook):
+            from timelapse import render
+            result = render(place, out, hook)
+            if not result:
+                return None, None
+            return result, captions.build_caption(place, hook, result["years"], result["source"],
+                                                  index=len(state["posted"]))
+        yield dict(id=place["id"], round=rnd, label=f"{place['name']} (round {rnd})", make=make)
+
+
 def maybe_refresh_token(state, token):
     last = state.get("token_refreshed_at")
     if last and dt.datetime.fromisoformat(last) > dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=REFRESH_EVERY_DAYS):
@@ -116,43 +146,42 @@ def maybe_refresh_token(state, token):
 
 
 def render_next(dry_run):
-    """Render the next place into work/pending/ (reel.mp4, caption.txt, pending.json)."""
+    """Render the next Reel into work/pending/ (reel.mp4, pending.json)."""
     state = load_state()
     attempts = 0
-    for place, rnd, hook in queue(state):
+    for job in next_jobs(state):
         if attempts >= MAX_ATTEMPTS:
             break
         attempts += 1
-        print(f"\n▶ {place['name']} (round {rnd})")
-        out = WORK / f"{place['id']}-r{rnd}"
-        result = render(place, out, hook)
+        print(f"\n▶ {job['label']}")
+        out = WORK / f"{job['id']}-r{job['round']}"
+        result, caption = job["make"](out)
         if not result:
-            state["failed"].append({"id": place["id"], "round": rnd, "at": now(),
-                                    "reason": "not enough clear years"})
+            state["failed"].append({"id": job["id"], "round": job["round"], "at": now(),
+                                    "reason": "could not render"})
             if not dry_run:          # test runs never change progress
                 save_state(state)
             continue
 
-        caption = captions.build_caption(place, hook, result["years"], result["source"],
-                                         index=len(state["posted"]))
         (out / "caption.txt").write_text(caption)
-        print(f"  video {result['duration']:.1f}s, {len(result['years'])} years")
+        print(f"  video {result['duration']:.1f}s")
         if dry_run:
             print(f"\n--- caption ---\n{caption}\n---------------\nDry run: not posted. Files in {out}")
             return
 
         PENDING.mkdir(parents=True, exist_ok=True)
         shutil.copy(result["video"], PENDING / "reel.mp4")
-        (PENDING / "pending.json").write_text(json.dumps({
-            "id": place["id"], "round": rnd, "caption": caption, "duration": result["duration"],
-            "years": [result["years"][0], result["years"][-1]],
-        }, ensure_ascii=False, indent=2))
+        meta = {"id": job["id"], "round": job["round"], "caption": caption, "duration": result["duration"]}
+        if "years" in result:
+            meta["years"] = [result["years"][0], result["years"][-1]]
+        (PENDING / "pending.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
         print(f"  ready to post: {PENDING / 'reel.mp4'}")
         return
 
     if attempts == 0:
-        sys.exit(f"The place catalog is used up. Add more places to {catalog().name}.")
-    sys.exit(f"No place could be rendered in {attempts} attempts; will try the next ones on the next run.")
+        sys.exit("Nothing left to post. Add more topics to explainers.json." if CONTENT == "explainers"
+                 else f"The place catalog is used up. Add more places to {catalog().name}.")
+    sys.exit(f"Nothing could be rendered in {attempts} attempts; will try the next ones on the next run.")
 
 
 def wait_until_online(url, minutes=3):
@@ -188,20 +217,22 @@ def publish(video_url):
         str(me["user_id"]), token, video_url, pending["caption"],
         thumb_offset_ms=(pending["duration"] - 1.0) * 1000)
     state["posted"].append({"id": pending["id"], "round": pending["round"], "at": now(),
-                            "media_id": media_id, "permalink": permalink, "years": pending["years"]})
+                            "media_id": media_id, "permalink": permalink,
+                            **({"years": pending["years"]} if "years" in pending else {})})
     save_state(state)
     print(f"✅ posted: {permalink or media_id}")
 
 
 def status():
     state = load_state()
-    upcoming = list(queue(state))
-    print(f"Catalog: {catalog().name}   Posted: {len(state['posted'])}   Failed: {len(state['failed'])}"
+    upcoming = list(next_jobs(state))
+    source = "explainers.json" if CONTENT == "explainers" else catalog().name
+    print(f"Content: {CONTENT} ({source})   Posted: {len(state['posted'])}   Failed: {len(state['failed'])}"
           f"   Left: {len(upcoming)}  (~{len(upcoming) / POSTS_PER_DAY:.1f} days at {POSTS_PER_DAY}/day)")
     for p in state["posted"][-5:]:
         print(f"  ✔ {p['at'][:16]}  {p['id']} r{p['round']}  {p.get('permalink') or ''}")
-    for place, rnd, _ in upcoming[:6]:
-        print(f"  … next: {place['id']} r{rnd}")
+    for job in upcoming[:6]:
+        print(f"  … next: {job['label']}")
 
 
 def clean_secrets():

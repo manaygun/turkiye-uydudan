@@ -6,3 +6,7 @@ pillow
 imageio-ffmpeg
 pyproj
 requests
+# explainer voiceover (install torch from the CPU index first, see the workflow)
+kokoro
+soundfile
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
