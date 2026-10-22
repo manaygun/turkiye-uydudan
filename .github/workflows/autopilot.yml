@@ -1,5 +1,10 @@
 name: Instagram autopilot
 
+# One run = one Reel, in three stages so the slow 3D render is split across machines:
+#   prepare  narration (Kokoro), timings and the 3D plan for the next topic
+#   frames   6 machines in parallel, each renders a slice of the frames in Blender
+#   finish   frames + subtitles + logo + audio -> reel.mp4, hosted on GitHub Pages, posted to Instagram
+
 on:
   schedule:
     # 4 Reels a day (UTC): 08:17, 13:17, 18:17, 23:17. Off the top of the hour, when GitHub's scheduler is busiest
@@ -24,15 +29,16 @@ concurrency:
 env:
   # scheduled runs have no inputs: they post
   MODE: ${{ inputs.mode || 'post' }}
-  # explainers = animated English explainers; satellite = satellite timelapses
   CONTENT: explainers
+  BLENDER_VERSION: "5.2.3"
+  CHUNKS: 6
 
 jobs:
-  post:
+  prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    environment:
-      name: github-pages
+    timeout-minutes: 30
+    outputs:
+      ready: ${{ steps.prepare.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -60,9 +66,96 @@ jobs:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
         run: python autopilot.py check
 
-      - name: Render
+      - name: Narration and 3D plan
+        id: prepare
         if: env.MODE != 'check'
-        run: python autopilot.py render ${{ env.MODE == 'dry-run' && '--dry-run' || '' }}
+        run: python autopilot.py prepare
+
+      - uses: actions/upload-artifact@v4
+        if: steps.prepare.outcome == 'success'
+        with:
+          name: pending
+          path: work/pending
+          retention-days: 2
+
+  frames:
+    needs: prepare
+    if: needs.prepare.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        chunk: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pending
+          path: work/pending
+
+      - name: Cache Blender
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}
+
+      - name: Install Blender
+        run: |
+          if [ ! -x ~/blender/blender ]; then
+            v="${BLENDER_VERSION}"
+            curl -sSL "https://download.blender.org/release/Blender${v%.*}/blender-${v}-linux-x64.tar.xz" | tar -xJ -C ~
+            mv ~/blender-${v}-linux-x64 ~/blender
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libxkbcommon0 libsm6 libegl1
+          echo "BLENDER=$HOME/blender/blender" >> "$GITHUB_ENV"
+          pip install numpy pillow imageio-ffmpeg requests
+
+      - name: Render slice ${{ matrix.chunk }} of ${{ env.CHUNKS }}
+        run: python autopilot.py frames --chunk ${{ matrix.chunk }}/${{ env.CHUNKS }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frames-${{ matrix.chunk }}
+          path: work/pending/frames
+          retention-days: 2
+
+  finish:
+    needs: [prepare, frames]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          sudo apt-get install -y -qq fonts-dejavu-core
+          pip install numpy pillow imageio-ffmpeg requests
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pending
+          path: work/pending
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: frames-*
+          path: work/pending/frames
+          merge-multiple: true
+
+      - name: Compose the Reel
+        run: python autopilot.py compose
 
       - name: Stage the Reel for GitHub Pages
         if: env.MODE == 'post'
@@ -104,6 +197,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reel-${{ github.run_id }}
-          path: work/*/reel.mp4
+          path: |
+            work/pending/reel.mp4
+            work/pending/pending.json
           retention-days: 7
           if-no-files-found: ignore

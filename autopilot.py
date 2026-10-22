@@ -5,8 +5,11 @@ CONTENT (environment) chooses what is posted:
   explainers  (default) animated, narrated English explainers from explainers.json
   satellite   satellite timelapses from places_world.json / places_tr.json
 
-  python autopilot.py render                 # render the next place into work/pending/
+  python autopilot.py render                 # render the next Reel into work/pending/ (all stages here)
   python autopilot.py render --dry-run       # render + print caption, nothing saved for posting
+  python autopilot.py prepare                # explainers, stage 1: narration + 3D plan into work/pending/
+  python autopilot.py frames --chunk 2/6     # explainers, stage 2: render one slice of the 3D frames
+  python autopilot.py compose                # explainers, stage 3: frames + subtitles + audio -> reel.mp4
   python autopilot.py publish --video-url U  # post work/pending/ (Instagram downloads the video from U)
   python autopilot.py status                 # what's been posted, what's next
   python autopilot.py check                  # verify the Instagram token works
@@ -104,7 +107,7 @@ def next_jobs(state):
                 import explain
                 result = explain.render(topic, out)
                 return result, captions.build_explainer_caption(topic, index=len(state["posted"]))
-            yield dict(id=topic["id"], round=1, label=topic["title"], make=make)
+            yield dict(id=topic["id"], round=1, label=topic["title"], make=make, topic=topic)
         return
 
     for place, rnd, hook in queue(state):
@@ -182,6 +185,31 @@ def render_next(dry_run):
         sys.exit("Nothing left to post. Add more topics to explainers.json." if CONTENT == "explainers"
                  else f"The place catalog is used up. Add more places to {catalog().name}.")
     sys.exit(f"Nothing could be rendered in {attempts} attempts; will try the next ones on the next run.")
+
+
+def prepare_next():
+    """Explainers, stage 1 (on one machine): narration, timings and the 3D plan for the next topic."""
+    import explain
+    state = load_state()
+    job = next(next_jobs(state), None)
+    if job is None:
+        sys.exit("Nothing left to post. Add more topics to explainers.json.")
+    print(f"\n▶ {job['label']}")
+    shutil.rmtree(PENDING, ignore_errors=True)
+    explain.prepare(job["topic"], PENDING)
+    caption = captions.build_explainer_caption(job["topic"], index=len(state["posted"]))
+    (PENDING / "pending.json").write_text(json.dumps(
+        {"id": job["id"], "round": job["round"], "caption": caption}, ensure_ascii=False, indent=2))
+    print(f"\n--- caption ---\n{caption}\n---------------")
+
+
+def compose_pending():
+    """Explainers, stage 3: turn the rendered frames into work/pending/reel.mp4."""
+    import explain
+    result = explain.compose(PENDING)
+    meta = json.loads((PENDING / "pending.json").read_text())
+    meta["duration"] = result["duration"]
+    (PENDING / "pending.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
 
 def wait_until_online(url, minutes=3):
@@ -279,11 +307,23 @@ def main():
     r.add_argument("--dry-run", action="store_true", help="render and print the caption only")
     pub = sub.add_parser("publish", help="post the rendered Reel")
     pub.add_argument("--video-url", required=True, help="public URL where Instagram can download reel.mp4")
+    sub.add_parser("prepare", help="explainers: narration + 3D plan for the next topic")
+    fr = sub.add_parser("frames", help="explainers: render the 3D frames (or one slice)")
+    fr.add_argument("--chunk", help="k/K: render only slice k of K, e.g. 0/6")
+    sub.add_parser("compose", help="explainers: frames + subtitles + audio -> reel.mp4")
     sub.add_parser("status")
     sub.add_parser("check")
     args = p.parse_args()
     if args.cmd == "render":
         render_next(args.dry_run)
+    elif args.cmd == "prepare":
+        prepare_next()
+    elif args.cmd == "frames":
+        import explain
+        chunk = tuple(map(int, args.chunk.split("/"))) if args.chunk else None
+        explain.render_frames(PENDING, chunk)
+    elif args.cmd == "compose":
+        compose_pending()
     elif args.cmd == "publish":
         publish(args.video_url)
     elif args.cmd == "status":
