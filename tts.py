@@ -8,7 +8,7 @@ import re
 import numpy as np
 
 SR = 24000
-VOICE = "af_heart"      # Kokoro's highest-rated American English voice
+VOICE = "am_michael"    # male American English voice
 SPEED = 1.08            # a little brisk, as Reels narration usually is
 
 _pipeline = None

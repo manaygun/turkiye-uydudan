@@ -2,16 +2,16 @@
 """Render an animated, narrated explainer Reel (1080x1920) from a short script.
 
 A script is a list of beats. Each beat has narration ("say") and a visual ("show"):
-  title    icons in a row + big text            {"type": "title", "icons": ["📱","📱"], "text": "< 1 second"}
-  split    an icon breaks into many pieces      {"type": "split", "icon": "🖼", "label": "≈ 2,000 packets"}
-  merge    pieces come back together            {"type": "merge", "icon": "🖼", "label": "..."}
-  focus    one big icon with callouts           {"type": "focus", "icon": "✉", "callouts": ["...", "..."]}
-  flow     packets travel between nodes         {"type": "flow", "nodes": [["📱","Phone"], ["📶","Router"]], "style": "light"}
-  stat     a number counts up                   {"type": "stat", "value": "0.3", "unit": "seconds", "label": "..."}
-  list     items appear one by one              {"type": "list", "items": [["🔒","Encrypted"], ...]}
-  compare  two things side by side              {"type": "compare", "left": ["🐢","4G"], "right": ["🐇","5G"]}
-
-Each beat lasts as long as its narration. Subtitles are shown word by word, synced to the voice.
+  title    icons in a row                       {"type": "title", "icons": ["📱","📱"]}
+  split    an icon breaks into many pieces      {"type": "split", "icon": "🖼"}
+  merge    pieces come back together            {"type": "merge", "icon": "🖼"}
+  focus    one big icon, pulsing                {"type": "focus", "icon": "✉"}
+  flow     packets travel between nodes         {"type": "flow", "nodes": [["📱"], ["📶"]], "style": "light"}
+  stat     a number counts up                   {"type": "stat", "value": "0.3", "icon": "⏱"}
+  list     icons appear one by one              {"type": "list", "items": [["🔒"], ["🔑"]]}
+  compare  two things side by side              {"type": "compare", "left": ["🐢"], "right": ["🐇"]}
+Text fields in the script (labels, callouts, units) are not drawn: the voice explains, and the
+only text on screen is one subtitle word at a time. Each beat lasts as long as its narration.
 
   python explain.py --topic photo-to-phone
 """
@@ -22,7 +22,6 @@ import math
 import re
 import sys
 import tempfile
-import textwrap
 import wave
 from functools import lru_cache
 from pathlib import Path
@@ -37,8 +36,8 @@ import tts
 ROOT = Path(__file__).parent
 W, H, FPS = 1080, 1920, 30
 SAFE_L, SAFE_R = 120, W - 120      # tall phones crop the sides
-STAGE_CY = 660                      # centre of the animation area (y 330..1000)
-SUB_Y = 1095                        # subtitles: above Instagram's caption, left of its buttons
+STAGE_CY = 700                      # centre of the animation area
+SUB_Y = 1130                        # one subtitle word at a time, above Instagram's caption
 HANDLE = "@gecmistenharita"
 LOGO_MARK = ROOT / "assets" / "logo_mark.png"
 SR = 44100
@@ -130,20 +129,6 @@ def text(d, xy, s, size, fill=WHITE, bold=True, anchor="mm", alpha=1.0, stroke=0
            stroke_width=stroke, stroke_fill=(0, 0, 0, int(255 * alpha)))
 
 
-def pill(d, cx, cy, s, size=38, alpha=1.0, color=CYAN):
-    if alpha <= 0.01:
-        return
-    f = font(size)
-    w = f.getlength(s) + 56
-    h = size + 34
-    a = int(255 * alpha)
-    d.rounded_rectangle([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], radius=h / 2,
-                        fill=PANEL + (int(230 * alpha),), outline=color + (a,), width=3)
-    d.text((cx, cy), s, font=f, fill=WHITE[:3] + (a,), anchor="mm")
-
-
-def wrap(s, width):
-    return textwrap.wrap(s, width=width) or [""]
 
 
 # ---------------------------------------------------------------- beats
@@ -151,98 +136,85 @@ def wrap(s, width):
 def beat_title(c, d, show, t, dur):
     icons = show.get("icons", [])
     n = max(1, len(icons))
-    gap = min(280, (SAFE_R - SAFE_L) / n)
+    gap = min(300, (SAFE_R - SAFE_L) / n)
     x0 = W / 2 - gap * (n - 1) / 2
-    for i, ic in enumerate(icons):
-        a = appear(t, 0.15 * i)
-        bob = math.sin((t + i) * 2.2) * 8
-        paste_icon(c, ic, 200, x0 + i * gap, STAGE_CY - 90 + bob, a, 0.6 + 0.4 * a)
     if n > 1:   # a pulse travelling along the row
+        d.line([x0, STAGE_CY + 150, x0 + gap * (n - 1), STAGE_CY + 150], fill=GREY + (90,), width=4)
         p = (t * 0.8) % 1
         x = x0 + p * gap * (n - 1)
-        d.ellipse([x - 12, STAGE_CY + 40 - 12, x + 12, STAGE_CY + 40 + 12], fill=YELLOW + (230,))
-        d.line([x0, STAGE_CY + 40, x0 + gap * (n - 1), STAGE_CY + 40], fill=GREY + (90,), width=4)
-    if show.get("text"):
-        for k, line in enumerate(wrap(show["text"], 18)[:2]):
-            text(d, (W / 2, STAGE_CY + 160 + k * 92), line, 84, YELLOW, alpha=appear(t, 0.4))
+        d.ellipse([x - 14, STAGE_CY + 136, x + 14, STAGE_CY + 164], fill=YELLOW + (230,))
+    for i, ic in enumerate(icons):
+        a = appear(t, 0.15 * i)
+        bob = math.sin((t + i) * 2.2) * 10
+        paste_icon(c, ic, 230, x0 + i * gap, STAGE_CY + bob, a, 0.6 + 0.4 * a)
 
 
 def _grid(n):
     cols = 6
     rows = math.ceil(n / cols)
     xs = np.linspace(SAFE_L + 70, SAFE_R - 70, cols)
-    ys = np.linspace(STAGE_CY - 200, STAGE_CY + 150, rows)
+    ys = np.linspace(STAGE_CY - 190, STAGE_CY + 190, rows)
     return [(xs[i % cols], ys[i // cols]) for i in range(n)]
 
 
-def _pieces(c, d, t, dur, icon, label, reverse):
+def _pieces(c, d, t, dur, icon, reverse):
     n = 24
     grid = _grid(n)
     p_icon = 1 - ease_in_out(t / 0.5) if not reverse else ease_in_out((t - dur * 0.55) / 0.5)
-    paste_icon(c, icon, 320, W / 2, STAGE_CY - 30, p_icon, 0.7 + 0.3 * p_icon)
+    paste_icon(c, icon, 360, W / 2, STAGE_CY, p_icon, 0.7 + 0.3 * p_icon)
     for i, (gx, gy) in enumerate(grid):
         if not reverse:
             p = ease_in_out((t - 0.3 - i * 0.025) / 0.7)
         else:
             p = 1 - ease_in_out((t - 0.2 - (n - i) * 0.02) / (dur * 0.45))
         x = W / 2 + (gx - W / 2) * p
-        y = STAGE_CY - 30 + (gy - STAGE_CY + 30) * p
-        s = 30 + 14 * p
+        y = STAGE_CY + (gy - STAGE_CY) * p + math.sin(t * 3 + i) * 6 * p
+        s = 30 + 16 * p
         if 0.02 < p:
             col = PALETTE[i % len(PALETTE)]
             d.rounded_rectangle([x - s / 2, y - s / 2, x + s / 2, y + s / 2], radius=8, fill=col + (230,))
-    if label:
-        text(d, (W / 2, STAGE_CY + 270), label, 54, YELLOW, alpha=appear(t, 0.6))
 
 
 def beat_split(c, d, show, t, dur):
-    _pieces(c, d, t, dur, show.get("icon", "🖼"), show.get("label"), reverse=False)
+    _pieces(c, d, t, dur, show.get("icon", "🖼"), reverse=False)
 
 
 def beat_merge(c, d, show, t, dur):
-    _pieces(c, d, t, dur, show.get("icon", "🖼"), show.get("label"), reverse=True)
+    _pieces(c, d, t, dur, show.get("icon", "🖼"), reverse=True)
 
 
 def beat_focus(c, d, show, t, dur):
     a = appear(t)
-    ring = (t * 0.9) % 1
-    r = 170 + ring * 110
-    d.ellipse([W / 2 - r, STAGE_CY - 120 - r, W / 2 + r, STAGE_CY - 120 + r],
-              outline=CYAN + (int(160 * (1 - ring)),), width=5)
-    paste_icon(c, show.get("icon", "💡"), 280, W / 2, STAGE_CY - 120, a, 0.7 + 0.3 * a)
-    callouts = show.get("callouts", [])[:3]
-    step = max(0.5, (dur - 0.6) / max(1, len(callouts)))
-    for i, s in enumerate(callouts):
-        pill(d, W / 2, STAGE_CY + 110 + i * 92, s, alpha=appear(t, 0.3 + i * step),
-             color=PALETTE[i % len(PALETTE)])
+    for k in range(2):                       # two expanding rings
+        ring = (t * 0.7 + k / 2) % 1
+        r = 190 + ring * 170
+        d.ellipse([W / 2 - r, STAGE_CY - r, W / 2 + r, STAGE_CY + r],
+                  outline=CYAN + (int(170 * (1 - ring) * a),), width=5)
+    scale = (0.7 + 0.3 * a) * (1 + 0.03 * math.sin(t * 3))
+    paste_icon(c, show.get("icon", "💡"), 340, W / 2, STAGE_CY, a, scale)
 
 
 def beat_flow(c, d, show, t, dur):
     nodes = show.get("nodes", [])[:4]
     n = max(2, len(nodes))
-    xs = np.linspace(SAFE_L + 90, SAFE_R - 90, n)
-    y = STAGE_CY - 60
+    xs = np.linspace(SAFE_L + 95, SAFE_R - 95, n)
+    y = STAGE_CY
     color = YELLOW if show.get("style") == "light" else CYAN
-    # dashed track
-    for k in range(int(xs[0]), int(xs[-1]), 28):
+    for k in range(int(xs[0]), int(xs[-1]), 28):       # dashed track
         d.line([k, y, k + 14, y], fill=GREY + (110,), width=4)
-    # packets flowing left to right, continuously
-    for k in range(7):
-        p = ((t * 0.55 + k / 7) % 1)
+    for k in range(7):                                   # packets flowing left to right
         if t < 0.4:
             break
+        p = ((t * 0.55 + k / 7) % 1)
         x = xs[0] + (xs[-1] - xs[0]) * p
         if show.get("style") == "light":
-            d.line([x - 60, y, x, y], fill=color + (120,), width=10)
-        d.ellipse([x - 13, y - 13, x + 13, y + 13], fill=color + (240,))
+            d.line([x - 70, y, x, y], fill=color + (120,), width=12)
+        d.ellipse([x - 14, y - 14, x + 14, y + 14], fill=color + (240,))
     for i, node in enumerate(nodes):
-        icon, label = node[0], node[1] if len(node) > 1 else ""
         a = appear(t, 0.12 * i)
-        d.ellipse([xs[i] - 105, y - 105, xs[i] + 105, y + 105], fill=PANEL + (int(235 * a),),
-                  outline=color + (int(200 * a),), width=4)
-        paste_icon(c, icon, 120, xs[i], y, a, 0.7 + 0.3 * a)
-        for k, line in enumerate(wrap(label, 12)[:2]):
-            text(d, (xs[i], y + 150 + k * 44), line, 38, WHITE, alpha=a)
+        d.ellipse([xs[i] - 110, y - 110, xs[i] + 110, y + 110], fill=PANEL + (int(235 * a),),
+                  outline=color + (int(200 * a),), width=5)
+        paste_icon(c, node[0], 130, xs[i], y, a, 0.7 + 0.3 * a)
 
 
 def _number(value, p):
@@ -264,37 +236,32 @@ def _number(value, p):
 def beat_stat(c, d, show, t, dur):
     p = clamp(t / max(0.6, dur * 0.6))
     if show.get("icon"):
-        paste_icon(c, show["icon"], 150, W / 2, STAGE_CY - 250, appear(t))
-    text(d, (W / 2, STAGE_CY - 40), _number(show.get("value", ""), p), 190, YELLOW, alpha=appear(t))
-    text(d, (W / 2, STAGE_CY + 110), show.get("unit", ""), 64, WHITE, alpha=appear(t, 0.2))
-    for k, line in enumerate(wrap(show.get("label", ""), 26)[:2]):
-        text(d, (W / 2, STAGE_CY + 210 + k * 56), line, 44, GREY, bold=False, alpha=appear(t, 0.4))
+        paste_icon(c, show["icon"], 200, W / 2, STAGE_CY - 200, appear(t), 1 + 0.04 * math.sin(t * 3))
+    value = _number(show.get("value", ""), p)
+    size = 200 if len(value) <= 7 else int(200 * 7 / len(value)) + 20
+    text(d, (W / 2, STAGE_CY + 60), value, size, YELLOW, alpha=appear(t))
 
 
 def beat_list(c, d, show, t, dur):
     items = show.get("items", [])[:4]
-    step = max(0.45, (dur - 0.5) / max(1, len(items)))
-    y0 = STAGE_CY - (len(items) - 1) * 75
+    n = max(1, len(items))
+    step = max(0.45, (dur - 0.5) / n)
+    xs = np.linspace(SAFE_L + 100, SAFE_R - 100, n) if n > 1 else [W / 2]
     for i, item in enumerate(items):
-        icon, label = item[0], item[1] if len(item) > 1 else ""
         a = appear(t, 0.2 + i * step)
-        x = SAFE_L + 70 - 40 * (1 - a)
-        y = y0 + i * 150
-        d.rounded_rectangle([SAFE_L, y - 62, SAFE_R, y + 62], radius=30, fill=PANEL + (int(220 * a),))
-        paste_icon(c, icon, 90, x + 10, y, a)
-        text(d, (x + 90, y), label, 46, WHITE, anchor="lm", alpha=a)
+        d.ellipse([xs[i] - 90, STAGE_CY - 90, xs[i] + 90, STAGE_CY + 90], fill=PANEL + (int(220 * a),),
+                  outline=PALETTE[i % len(PALETTE)] + (int(220 * a),), width=5)
+        paste_icon(c, item[0], 110, xs[i], STAGE_CY - 30 * (1 - a), a)
 
 
 def beat_compare(c, d, show, t, dur):
-    for side, x, delay in (("left", 310, 0.0), ("right", 770, 0.35)):
-        item = show.get(side, ["❓", ""])
+    for side, x, delay in (("left", 290, 0.0), ("right", 790, 0.35)):
+        item = show.get(side, ["❓"])
         a = appear(t, delay)
-        paste_icon(c, item[0], 220, x, STAGE_CY - 80, a, 0.7 + 0.3 * a)
-        for k, line in enumerate(wrap(item[1] if len(item) > 1 else "", 14)[:3]):
-            text(d, (x, STAGE_CY + 100 + k * 52), line, 44, WHITE, alpha=a)
+        paste_icon(c, item[0], 260, x, STAGE_CY + math.sin(t * 2 + x) * 8, a, 0.7 + 0.3 * a)
     a = appear(t, 0.2)
-    d.ellipse([W / 2 - 55, STAGE_CY - 135, W / 2 + 55, STAGE_CY - 25], fill=YELLOW + (int(255 * a),))
-    text(d, (W / 2, STAGE_CY - 80), "vs", 48, (12, 14, 18), alpha=a)
+    d.ellipse([W / 2 - 55, STAGE_CY - 55, W / 2 + 55, STAGE_CY + 55], fill=YELLOW + (int(255 * a),))
+    text(d, (W / 2, STAGE_CY), "vs", 48, (12, 14, 18), alpha=a)
 
 
 BEATS = dict(title=beat_title, split=beat_split, merge=beat_merge, focus=beat_focus,
@@ -328,52 +295,28 @@ def watermark():
     return wm
 
 
-def subtitle_lines(words, max_w=800, max_words=5):
-    """Group timed words into short on-screen lines."""
-    f = font(62)
-    lines, cur = [], []
-    for w in words:
-        trial = " ".join(x[0] for x in cur + [w])
-        if cur and (f.getlength(trial) > max_w or len(cur) >= max_words or cur[-1][0][-1:] in ".?!"):
-            lines.append(cur)
-            cur = []
-        cur.append(w)
-    if cur:
-        lines.append(cur)
-    return lines
+def subtitle_lines(words):
+    """One word on screen at a time (kept for the render loop's per-beat lookup)."""
+    return words
 
 
-def draw_subtitle(d, lines, now):
-    line = next((l for l in lines if l[0][1] - 0.05 <= now <= l[-1][2] + 0.25), None)
-    if not line:
+def draw_subtitle(d, words, now):
+    word = next((w for w in words if w[1] - 0.04 <= now <= w[2] + 0.12), None)
+    if not word:
         return
-    f = font(62)
-    full = " ".join(w for w, _, _ in line)
-    x = W / 2 - f.getlength(full) / 2
-    for w, s, e in line:
-        color = YELLOW if s - 0.03 <= now <= e + 0.05 else WHITE
-        d.text((x, SUB_Y), w, font=f, fill=color + (255,), anchor="lm", stroke_width=5, stroke_fill=(0, 0, 0, 255))
-        x += f.getlength(w + " ")
+    w, s, e = word
+    pop = 1 + 0.12 * (1 - ease_out((now - s) / 0.12))          # small pop as each word appears
+    d.text((W / 2, SUB_Y), w.strip(".,!?;:"), font=font(int(92 * pop)), fill=WHITE + (255,),
+           anchor="mm", stroke_width=7, stroke_fill=(0, 0, 0, 255))
 
 
-def draw_header(d, title, progress):
-    for k, line in enumerate(wrap(title, 26)[:2]):
-        text(d, (W / 2, 190 + k * 58), line, 48, WHITE)
-    y = 300
-    d.rounded_rectangle([SAFE_L, y - 4, SAFE_R, y + 4], radius=4, fill=(50, 60, 90, 255))
-    d.rounded_rectangle([SAFE_L, y - 4, SAFE_L + (SAFE_R - SAFE_L) * progress, y + 4], radius=4,
-                        fill=YELLOW + (255,))
-
-
-def draw_outro(c, d, t, line):
+def draw_outro(c, d, t, line=None):
     a = appear(t)
     if LOGO_MARK.exists():
-        logo = Image.open(LOGO_MARK).convert("RGBA").resize((300, 300), Image.LANCZOS)
+        logo = Image.open(LOGO_MARK).convert("RGBA").resize((340, 340), Image.LANCZOS)
         logo.putalpha(logo.getchannel("A").point(lambda v: int(v * a)))
-        c.alpha_composite(logo, (W // 2 - 150, STAGE_CY - 300))
-    text(d, (W / 2, STAGE_CY + 60), f"Follow {HANDLE}", 58, YELLOW, alpha=appear(t, 0.2))
-    for k, l in enumerate(wrap(line, 30)[:2]):
-        text(d, (W / 2, STAGE_CY + 140 + k * 56), l, 44, WHITE, bold=False, alpha=appear(t, 0.4))
+        c.alpha_composite(logo, (W // 2 - 170, STAGE_CY - 220))
+    text(d, (W / 2, STAGE_CY + 190), HANDLE, 54, YELLOW, alpha=appear(t, 0.2))
 
 
 # ---------------------------------------------------------------- audio
@@ -452,7 +395,7 @@ def render(topic, out_dir, log=print):
             d = ImageDraw.Draw(layer)
             show = seg["beat"]["show"]
             if show["type"] == "outro":
-                draw_outro(layer, d, t, topic.get("outro", "Everyday tech and science, explained."))
+                draw_outro(layer, d, t)
             else:
                 BEATS[show["type"]](layer, d, show, t, seg["dur"])
             # quick fade between beats
@@ -461,9 +404,8 @@ def render(topic, out_dir, log=print):
                 layer.putalpha(layer.getchannel("A").point(lambda v: int(v * fade)))
             frame.alpha_composite(layer)
             d2 = ImageDraw.Draw(frame)
-            draw_header(d2, topic["title"], clamp(now / total))
             draw_subtitle(d2, lines[seg_i], now)
-            frame.alpha_composite(watermark(), (SAFE_L, 1215))
+            frame.alpha_composite(watermark(), (SAFE_L, 190))
             rgb = frame.convert("RGB")
             if seg_i == 1 and cover is None and t > 1.0:
                 cover = rgb
