@@ -440,6 +440,13 @@ def obj_fridge(root):
     return 2.9
 
 
+def obj_ice(root):
+    for x, z, r in ((-0.45, 0.5, 0.2), (0.45, 0.45, -0.3), (0.0, 1.3, 0.5)):
+        c = cube((0.8, 0.8, 0.8), (x, 0, z), mat("ice", (0.7, 0.9, 1.0), 0.05, transmission=0.9), root, bev=0.12)
+        c.rotation_euler = (0, 0, r)
+    return 1.8
+
+
 def obj_microwave(root):
     cube((1.8, 1.2, 1.1), (0, 0, 0.55), M["white"], root, bev=0.06)
     cube((1.1, 0.04, 0.75), (-0.2, -0.6, 0.55), M["dark"], root, bev=0.03)
@@ -476,7 +483,7 @@ ICON_MODELS = {
     "🌍": obj_globe, "🌐": obj_globe, "☀": obj_sun, "⛈": lambda r: obj_cloud(r, storm=True),
     "☁": obj_cloud, "⚡": obj_bolt, "🙂": obj_person, "👀": obj_person, "👆": obj_person,
     "💳": obj_card, "📟": obj_terminal, "🌀": obj_coil, "🧲": obj_magnet, "🔋": obj_battery,
-    "✈": obj_plane, "🛫": obj_plane, "🚗": obj_car, "🧊": obj_fridge, "🍲": obj_microwave,
+    "✈": obj_plane, "🛫": obj_plane, "🚗": obj_car, "🧊": obj_ice, "🍲": obj_microwave,
     "💡": obj_bulb,
 }
 SEA = "🌊"
@@ -640,9 +647,9 @@ class Station:
 
     def build_stat(self, icons_png):
         if self.show.get("icon"):
-            self.add(self.show["icon"], 0, icons_png, z=3.2)
+            self.add(self.show["icon"], 0, icons_png, z=2.4)
         value = str(self.show.get("value", ""))
-        txt = text3d(value, (self.cx, -0.5, 1.6), 1.3, M["number"])
+        txt = text3d(value, (self.cx, -0.5, 1.1), 1.2, M["number"])
         txt.scale = (0.001, 0.001, 0.001)
         self.hidden.append(txt)
 
