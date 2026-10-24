@@ -1,6 +1,6 @@
 # @gecmistenharita: Instagram Reels autopilot
 
-This posts **4 narrated 3D explainer Reels a day** ("how does X work?") with no manual work after setup. Each Reel is a Blender-rendered cut-away diorama (grass above, soil layers in cross-section) that the camera glides through in one shot, with a male English voiceover and one subtitle word at a time. The earlier satellite-timelapse code (`timelapse.py`, the place catalogs) is still in the repo and runs locally with `CONTENT=satellite python autopilot.py render`; the workflow now runs the explainer pipeline.
+This posts **4 looping 3D explainer Reels a day** ("how does X work?") with no manual work after setup. Each Reel is an 18–30 second script (fact, how-to or story) rendered in Blender: a charcoal studio void with a glowing grid, holographic glass badges and 3D models, camera moves per beat (snap, orbit, top-down), lighting that shifts cyan / red / amber with the story, a bold headline per beat, a male voiceover with one subtitle word at a time, a sound effect on every beat, and a last beat that flies the camera back to Frame 0 so the Reel loops seamlessly. The earlier satellite-timelapse code (`timelapse.py`, the place catalogs) is still in the repo and runs locally with `CONTENT=satellite python autopilot.py render`; the workflow now runs the explainer pipeline.
 
 Each run does the following:
 1. Picks the next place from `places_world.json` (places around the world), or from [places_tr.json](places_tr.json) (50 places in Turkey) until the world catalog exists.
@@ -24,7 +24,9 @@ It runs on **GitHub Actions** at 08:17, 13:17, 18:17 and 23:17 UTC, so your comp
 | `music/` | Optional folder for your own royalty-free tracks (see `music/README.md`) |
 | `make_logo.py`, `assets/` | The logo: `assets/logo.png` is the profile picture, `assets/logo_mark.png` is the Reel watermark |
 | `.github/workflows/autopilot.yml` | Runs 4 times a day: prepare → 6 machines render slices of the frames in parallel → compose and post |
-| `explainers.json` | Explainer scripts: title, hook, narration per beat, what each beat shows, caption, hashtags |
+| `explainers.json` | Explainer scripts: per beat the narration, HUD headline, 3D station, camera move, light mood, sound effect and voice speed; plus caption, "Send this to…" line and hashtags |
+| `review_scripts.py`, `scripts_review.md` | Checks the scripts (45–65 words, short sentences, loop beat last, ...) and writes a readable table of every script |
+| `sfx.py` | Sound effects generated in code: whoosh, hit, glitch, pop, tick, ding, riser, rewind, zap, alarm, ... |
 | `explain.py` | Explainer pipeline: narration + plan (prepare), Blender frames, then subtitles, logo, outro and audio (compose) |
 | `scene3d.py` | Blender script: builds the 3D diorama from the plan (models for phones, routers, towers, servers, satellites, the globe, sea straits...) and renders it frame by frame |
 | `tts.py` | Male English voiceover with word timings (Kokoro, open source, runs on the GitHub runner) |
