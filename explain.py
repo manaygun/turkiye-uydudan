@@ -185,17 +185,15 @@ def blender_binary():
 
 
 def render_frames(out_dir, chunk=None, log=print):
-    """Render the diorama with Blender. chunk=(k, K) renders only the k-th of K slices."""
+    """Render the diorama with Blender. chunk=(k, K) renders every K-th frame starting at k, so
+    the K machines get an even share of easy and busy parts of the Reel."""
     out_dir = Path(out_dir)
     plan = json.loads((out_dir / "plan.json").read_text())
     n = int(plan["total"] * plan["fps"])
-    first, last = 0, n
-    if chunk:
-        k, kk = chunk
-        first, last = n * k // kk, n * (k + 1) // kk
-    log(f"  rendering frames {first}-{last - 1} of {n}")
+    first, step = (chunk[0], chunk[1]) if chunk else (0, 1)
+    log(f"  rendering frames {first}, {first + step}, ... of {n}")
     cmd = [blender_binary(), "-b", "--factory-startup", "-P", str(ROOT / "scene3d.py"), "--",
-           str(out_dir / "plan.json"), str(out_dir / "frames"), str(first), str(last)]
+           str(out_dir / "plan.json"), str(out_dir / "frames"), str(first), str(n), str(step)]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0 or "Traceback" in proc.stdout + proc.stderr:
         sys.exit(f"Blender failed:\n{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}")

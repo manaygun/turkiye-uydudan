@@ -3,7 +3,7 @@
 Run by explain.py, not by hand:
   blender -b --factory-startup -P scene3d.py -- PLAN.json OUT_DIR
 
-  blender -b --factory-startup -P scene3d.py -- PLAN.json OUT_DIR FIRST_FRAME LAST_FRAME
+  blender -b --factory-startup -P scene3d.py -- PLAN.json OUT_DIR FIRST_FRAME LAST_FRAME [STEP]
 
 PLAN.json: {"fps": 24, "total": 41.2, "width": 540, "height": 960, "samples": 6,
             "beats": [{"start": 0.4, "dur": 4.1, "show": {...}}, ...],
@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 SPACING = 12.0          # distance between stations along X
 DEPTH = 9.0             # thickness of the ground block (the soil cross-section fills the lower frame)
@@ -105,8 +105,8 @@ def bevel(obj, width=0.04, segments=3):
 def cube(size, loc, material, parent=None, bev=0.04):
     bpy.ops.mesh.primitive_cube_add(size=1, location=loc)
     o = bpy.context.object
-    o.scale = size
-    bpy.ops.object.transform_apply(scale=True)
+    # scale the mesh itself; transform_apply would also bake the scale of every other selected object
+    o.data.transform(Matrix.Diagonal((*size, 1.0)))
     if bev:
         bevel(o, bev)
     assign(o, material)
@@ -184,8 +184,8 @@ def build_materials():
     M["gold"] = mat("gold", (0.9, 0.7, 0.25), 0.3, 1.0)
     M["screen"] = mat("screen", (0.1, 0.3, 0.6), 0.2, emit=(0.25, 0.55, 1.0), emit_strength=2.5)
     M["window"] = mat("window", (0.9, 0.8, 0.5), 0.2, emit=(1.0, 0.85, 0.5), emit_strength=1.5)
-    M["cyan"] = mat("cyan", (0.2, 0.8, 1.0), 0.3, emit=(0.3, 0.85, 1.0), emit_strength=2.5)
-    M["yellow"] = mat("yellow", (1.0, 0.8, 0.3), 0.3, emit=(1.0, 0.8, 0.3), emit_strength=2.5)
+    M["cyan"] = mat("cyan", (0.2, 0.8, 1.0), 0.3, emit=(0.3, 0.85, 1.0), emit_strength=0.8)
+    M["yellow"] = mat("yellow", (1.0, 0.8, 0.3), 0.3, emit=(1.0, 0.8, 0.3), emit_strength=0.8)
     M["green_led"] = mat("led", (0.2, 1.0, 0.4), 0.3, emit=(0.2, 1.0, 0.4), emit_strength=8)
     M["red"] = mat("red", (0.8, 0.12, 0.1), 0.4)
     M["blue_panel"] = mat("panel", (0.08, 0.18, 0.45), 0.25, 0.4)
@@ -199,7 +199,7 @@ def build_materials():
     M["soil"] = soil_material()
     M["grass"] = grass_material()
     for i, c in enumerate([(0.3, 0.85, 1.0), (1.0, 0.8, 0.3), (1.0, 0.45, 0.55), (0.5, 0.9, 0.6), (0.75, 0.6, 1.0)]):
-        M[f"bit{i}"] = mat(f"bit{i}", c, 0.3, emit=c, emit_strength=1.2)
+        M[f"bit{i}"] = mat(f"bit{i}", c, 0.3, emit=c, emit_strength=0.35)
 
 
 def grass_material():
@@ -624,9 +624,9 @@ class Station:
             if not reverse:
                 s_obj = pop(t) * (1 - ease_in_out((t - 0.5) / 0.6))
                 ps = [ease_in_out((t - 0.6 - d) / 0.9) for _, _, d in cubes]
-            else:
-                s_obj = ease_in_out((t - dur * 0.6) / 0.5)
-                ps = [1 - ease_in_out((t - 0.3 - d) / (dur * 0.5)) for _, _, d in cubes]
+            else:   # cubes start scattered, fly home over ~2 s, and the object forms as they arrive
+                s_obj = ease_in_out((t - 1.7) / 0.5)
+                ps = [1 - ease_in_out((t - 0.2 - d) / 1.5) for _, _, d in cubes]
             root.scale = (max(s_obj, 0.001),) * 3
             for (c, target, d), p in zip(cubes, ps):
                 c.location = start.lerp(target, p) + Vector((0, 0, math.sin(t * 2 + d * 10) * 0.15 * p))
@@ -769,6 +769,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     first = int(argv[2]) if len(argv) > 2 else 0
     last = int(argv[3]) if len(argv) > 3 else None
+    step = int(argv[4]) if len(argv) > 4 else 1
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
@@ -818,7 +819,7 @@ def main():
     n_frames = int(plan["total"] * fps)
     last = n_frames if last is None else min(last, n_frames)
     outro_start = next((b["start"] for b in plan["beats"] if b["show"].get("type") == "outro"), plan["total"])
-    for f in range(first, last):
+    for f in range(first, last, step):
         now = f / fps
         if now >= outro_start:
             break                                   # the outro is drawn in 2D by explain.py
