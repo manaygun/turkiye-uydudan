@@ -737,7 +737,8 @@ class Station:
     # per frame ------------------------------------------------------
     def update(self, now):
         t = now - self.start
-        if t < 0 and not self.always:               # not reached yet: keep everything hidden
+        lead = 0.0 if self.always else 0.35          # objects start popping in just before the camera lands
+        if t < -lead and not self.always:           # not reached yet: keep everything hidden
             for root, *_ in self.items:
                 root.scale = (0.001,) * 3
             for o in self.hidden:
@@ -745,7 +746,7 @@ class Station:
             return
         for root, delay, base_z, scale in self.items:
             if self.kind not in ("split", "merge"):  # those animate their own scale
-                s = 1.0 if self.always else pop(t, delay)
+                s = 1.0 if self.always else pop(t + lead, delay)
                 root.scale = (max(s * scale, 0.001),) * 3
             root.location.z = base_z + 0.06 * math.sin(now * 1.6 + self.i)
         for fn in self.extra:
