@@ -505,10 +505,12 @@ def obj_tile(root, png):
     nt.links.new(img.outputs["Color"], bsdf.inputs["Emission Color"] if "Emission Color" in bsdf.inputs else bsdf.inputs["Emission"])
     set_input(bsdf, "Emission Strength", 1.6)
     nt.links.new(img.outputs["Alpha"], bsdf.inputs["Alpha"])
-    bpy.ops.mesh.primitive_plane_add(size=1.35, location=(0, -0.22, 1.25), rotation=(math.radians(90), 0, 0))
-    face = bpy.context.object
-    face.data.materials.append(m)
-    face.parent = root
+    for y, spin in ((-0.22, 0), (0.22, 180)):          # front and back, so orbits never show a blank badge
+        bpy.ops.mesh.primitive_plane_add(size=1.35, location=(0, y, 1.25),
+                                         rotation=(math.radians(90), 0, math.radians(spin)))
+        face = bpy.context.object
+        face.data.materials.append(m)
+        face.parent = root
     return 2.2
 
 
@@ -607,6 +609,7 @@ class Station:
         self.items = []          # (root, appear_delay, base_z, scale)
         self.extra = []          # per-frame animators: fn(t)
         self.focus_h = 2.0
+        self.half_w = 1.2
         self.hidden = []         # objects to keep invisible until the beat starts
         self.always = i == 0     # station 1 is fully built from Frame 0, so the loop frame-matches
         self.has_sea = SEA in json.dumps(self.show, ensure_ascii=False)
@@ -619,13 +622,14 @@ class Station:
         root, h = make_object(icon, (self.cx + x, 0, z), icons_png)
         self.items.append((root, delay, z, scale))
         self.focus_h = max(self.focus_h, h * scale)
+        self.half_w = max(self.half_w, abs(x) + 1.1 * scale)     # how wide the station is, for framing
         return root, h
 
     def build_title(self, icons_png):
         icons = self.show.get("icons", [])[:3]
-        xs = spread(len(icons), 2.2)
+        xs = spread(len(icons), 1.8)
         for k, (ic, x) in enumerate(zip(icons, xs)):
-            self.add(ic, x, icons_png, delay=0.15 * k)
+            self.add(ic, x, icons_png, delay=0.15 * k, scale=0.85)
         if len(icons) > 1:
             self.add_packets(xs[0], xs[-1], "cyan", n=3)
 
@@ -658,7 +662,7 @@ class Station:
             if down:
                 target = Vector((self.cx + rnd.uniform(-2.6, 2.6), rnd.uniform(-1.8, 1.2), rnd.uniform(0.15, 0.6)))
             else:
-                target = Vector((self.cx + rnd.uniform(-2.8, 2.8), rnd.uniform(-2.0, 1.5), rnd.uniform(0.8, 4.5)))
+                target = Vector((self.cx + rnd.uniform(-2.2, 2.2), rnd.uniform(-1.6, 1.4), rnd.uniform(0.6, 3.0)))
             cubes.append((c, target, rnd.uniform(0, 0.4)))
 
         def anim(t, root=root, cubes=cubes, reverse=reverse, dur=self.dur):
@@ -795,6 +799,8 @@ def station_pose(s, t):
         k = ease_in_out(t / 0.8)
         elev = lerp(elev, dist * 1.15, k)
         dist = lerp(dist, dist * 0.18, k)
+    if s.camera != "top":
+        dist = max(dist, s.half_w / 0.33)          # portrait frame is narrow: back off until everything fits
     cam = Vector((s.cx + dist * math.sin(azim), -dist * math.cos(azim), elev))
     return cam, Vector((s.cx, 0, target_z))
 
