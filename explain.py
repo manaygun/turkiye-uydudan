@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
-"""Make a narrated 3D explainer Reel (1080x1920) from a short script, in three stages:
+"""Make a narrated, looping 3D explainer Reel (1080x1920) from a script, in three stages:
 
-  1. prepare   narration (Kokoro TTS) + word timings + music bed -> plan.json, audio.wav, words.json
-  2. frames    Blender renders the 3D cut-away diorama (scene3d.py), optionally one slice of the frames
-  3. compose   upscale, one subtitle word at a time, logo watermark, outro card, audio -> reel.mp4
+  1. prepare   narration (Kokoro TTS, per-beat speed) + word timings + music bed + SFX -> plan.json, audio.wav
+  2. frames    Blender renders the dark-studio 3D scene (scene3d.py), optionally every K-th frame
+  3. compose   upscale, HUD headline per beat, one subtitle word at a time, logo, audio -> reel.mp4
 
 The stages are separate so GitHub can render slices of the frames on several machines at once.
 
-A script is a list of beats. Each beat has narration ("say") and a visual ("show"); scene3d.py
-turns each beat into a station of the diorama:
-  title    objects in a row, with a pulse between them   {"type": "title", "icons": ["📱", "🌍", "📱"]}
-  split    an object bursts into glowing cubes            {"type": "split", "icon": "🖼"}
-  merge    cubes fly back together into the object        {"type": "merge", "icon": "🖼"}
-  focus    one object on a turning pedestal               {"type": "focus", "icon": "✉"}
-  flow     packets travel between objects                 {"type": "flow", "nodes": [["📱"], ["📶"]], "style": "light"}
-  stat     a 3D number counts up                          {"type": "stat", "value": "0.3", "icon": "⏱"}
-  list     objects rise one by one on pedestals           {"type": "list", "items": [["🔒"], ["🔑"]]}
-  compare  two objects side by side                       {"type": "compare", "left": ["🐢"], "right": ["🐇"]}
-Icons with a dedicated 3D model (phones, routers, towers, servers, satellites, the globe...) are
-built as models; any other emoji becomes a chunky 3D tile with the emoji on it. 🌊 in a flow
-turns that station's ground into a strait of sea with the cable on the sea floor.
+Script beat fields:
+  say      narration; "—" and "..." make the voice pause
+  text     HUD headline shown above the scene for the beat (max ~4 words)
+  show     the 3D station: title | split | merge | focus | flow | stat | list | compare,
+           or {"type": "loop"} for the last beat (camera flies back to Frame 0)
+  camera   glide (default) | snap | orbit | orbit180 | top
+  light    calm (cyan, default) | warning (red) | amber
+  sfx      e.g. "glitch", "riser+hit", "tick+ding" (see sfx.py)
+  speed    voice speed for this beat (default 1.08; 1.15 for quick transitions)
 
-  python explain.py --topic photo-to-phone             # all three stages locally
+  python explain.py --topic airplane-lift             # all three stages locally
 """
 
 import argparse
@@ -31,7 +27,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import wave
 from functools import lru_cache
 from pathlib import Path
@@ -44,17 +39,17 @@ ROOT = Path(__file__).parent
 W, H = 1080, 1920
 FPS = 24
 RENDER = dict(width=540, height=960, samples=6)   # upscaled 2x; looks the same for this style
-SAFE_L = 120                                      # tall phones crop the sides
-SUB_Y = 1130                                      # subtitle word, above Instagram's caption
+SAFE_L, SAFE_R = 120, W - 120                     # tall phones crop the sides
+HUD_Y = 400                                       # beat headline, above the 3D scene
+SUB_Y = 1400                                      # subtitle word: below the scene, above Instagram's caption
 HANDLE = "@gecmistenharita"
 LOGO_MARK = ROOT / "assets" / "logo_mark.png"
 SR = 44100
-OUTRO_LINE = "Follow for more of how the world works."
-OUTRO_SECONDS = 3.0
-GAP = 0.25                                        # pause between beats
+GAP = 0.12                                        # pause between beats (pacing is in the script)
+LOOP_TAIL = 0.25                                  # the camera lands on Frame 0 just after the last word
 
-YELLOW = (255, 214, 92)
-WHITE = (240, 244, 250)
+WHITE = (245, 248, 252)
+MOOD_RGB = {"calm": (40, 200, 255), "warning": (255, 60, 50), "amber": (255, 160, 30)}
 
 
 # ---------------------------------------------------------------- helpers
@@ -71,7 +66,8 @@ def ease_out(x):
 @lru_cache(maxsize=None)
 def font(size, bold=True):
     candidates = (
-        ["/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        ["/System/Library/Fonts/Supplemental/Arial Black.ttf",
+         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
          "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"] if bold else
         ["/System/Library/Fonts/Supplemental/Arial.ttf",
          "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
@@ -87,7 +83,7 @@ EMOJI_FONTS = [("/System/Library/Fonts/Apple Color Emoji.ttc", 160),
 
 
 def emoji(ch, size):
-    """Colour emoji as an RGBA image (for the 3D tiles). Emoji fonts come in fixed sizes, so scale."""
+    """Colour emoji as an RGBA image (for the 3D badges). Emoji fonts come in fixed sizes, so scale."""
     ch = ch.replace("️", "")
     for path, native in EMOJI_FONTS:
         if Path(path).exists():
@@ -103,7 +99,7 @@ def emoji(ch, size):
                 canvas.alpha_composite(img, ((size - img.width) // 2, (size - img.height) // 2))
                 return canvas
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ImageDraw.Draw(img).text((size / 2, size / 2), ch[:1], font=font(size // 2), fill=(40, 60, 110), anchor="mm")
+    ImageDraw.Draw(img).text((size / 2, size / 2), ch[:1], font=font(size // 2), fill=(200, 220, 255), anchor="mm")
     return img
 
 
@@ -136,28 +132,37 @@ def write_wav(path, stereo):
 
 
 def prepare(topic, out_dir, log=print):
-    """Narration, timings and the 3D plan. Writes plan.json, audio.wav, words.json, icons/."""
+    """Narration, timings, sound and the 3D plan. Writes plan.json, audio.wav, words.json, icons/."""
     import music
+    import sfx
     import tts
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    beats, words, voice, t0 = [], [], [], 0.4
-    for beat in topic["beats"] + [{"say": OUTRO_LINE, "show": {"type": "outro"}}]:
-        audio, timed = tts.speak(beat["say"])
-        dur = len(audio) / tts.SR
-        if beat["show"]["type"] == "outro":
-            dur = max(dur, OUTRO_SECONDS - GAP)
-        beats.append({"start": round(t0, 3), "dur": round(dur + GAP, 3), "show": beat["show"]})
+    beats, words, voice, t0 = [], [], [], 0.0      # beat 1 starts at Frame 0, so the loop frame-matches
+    for k, beat in enumerate(topic["beats"]):
+        audio, timed = tts.speak(beat["say"], speed=beat.get("speed") or tts.SPEED)
+        dur = len(audio) / tts.SR + GAP
+        if beat["show"].get("type") == "loop":
+            dur += LOOP_TAIL
+        beats.append({"start": round(t0, 3), "dur": round(dur, 3), "show": beat["show"],
+                      "text": beat.get("text", ""), "camera": beat.get("camera", "glide"),
+                      "light": beat.get("light", "calm"), "sfx": beat.get("sfx", "")})
         words += [[w, round(t0 + s, 3), round(t0 + e, 3)] for w, s, e in timed]
         voice.append((t0, to_44k(audio, tts.SR)))
-        t0 += dur + GAP
-    total = round(t0 + 0.4, 3)
+        t0 += dur
+    total = round(t0, 3)
     log(f"  narration {total:.1f}s, {len(beats)} beats")
 
     n = int(SR * total)
     mix = np.zeros((n, 2), np.float32)
-    mix += music.generate(topic.get("mood", "tech"), total, seed=sum(map(ord, topic["id"])))[:n] * 0.16
+    seed = sum(map(ord, topic["id"]))
+    mix += music.generate(topic.get("mood", "tech"), total + 1, seed=seed)[:n] * 0.10
+    for k, b in enumerate(beats):                   # one sound effect on every beat
+        if b["sfx"]:
+            fx = sfx.sfx(b["sfx"], seed=seed + k)
+            i = int(b["start"] * SR)
+            mix[i:i + len(fx)] += fx[: max(0, n - i), None] * 0.32
     for start, a in voice:
         i = int(start * SR)
         mix[i:i + len(a)] += a[: n - i, None] * 0.95
@@ -185,7 +190,7 @@ def blender_binary():
 
 
 def render_frames(out_dir, chunk=None, log=print):
-    """Render the diorama with Blender. chunk=(k, K) renders every K-th frame starting at k, so
+    """Render the scene with Blender. chunk=(k, K) renders every K-th frame starting at k, so
     the K machines get an even share of easy and busy parts of the Reel."""
     out_dir = Path(out_dir)
     plan = json.loads((out_dir / "plan.json").read_text())
@@ -203,8 +208,8 @@ def render_frames(out_dir, chunk=None, log=print):
 
 @lru_cache(maxsize=None)
 def watermark():
-    f = font(32)
-    logo = 64
+    f = font(30)
+    logo = 60
     wm = Image.new("RGBA", (logo + 12 + int(f.getlength(HANDLE)) + 8, logo + 4), (0, 0, 0, 0))
     if LOGO_MARK.exists():
         wm.alpha_composite(Image.open(LOGO_MARK).convert("RGBA").resize((logo, logo), Image.LANCZOS), (0, 2))
@@ -213,41 +218,64 @@ def watermark():
     return wm
 
 
+@lru_cache(maxsize=None)
+def headline(text, light):
+    """Bold HUD headline with a glow in the beat's mood colour (cached per beat)."""
+    glow = MOOD_RGB.get(light, MOOD_RGB["calm"])
+    size = 104
+    f = font(size)
+    while f.getlength(text) > SAFE_R - SAFE_L - 20 and size > 56:
+        size -= 6
+        f = font(size)
+    w = int(f.getlength(text)) + 80
+    h = size + 80
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    halo = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(halo).text((w / 2, h / 2), text, font=f, fill=glow + (255,), anchor="mm",
+                              stroke_width=10, stroke_fill=glow + (255,))
+    img.alpha_composite(halo.filter(ImageFilter.GaussianBlur(14)))
+    ImageDraw.Draw(img).text((w / 2, h / 2), text, font=f, fill=WHITE + (255,), anchor="mm",
+                             stroke_width=4, stroke_fill=(10, 12, 18, 255))
+    bar_w = min(w - 80, 220)
+    ImageDraw.Draw(img).rounded_rectangle([w / 2 - bar_w / 2, h - 14, w / 2 + bar_w / 2, h - 6], radius=4,
+                                          fill=glow + (255,))
+    return img
+
+
+def draw_headline(frame, beat, now):
+    if not beat.get("text"):
+        return
+    img = headline(beat["text"], beat.get("light", "calm"))
+    t = now - beat["start"]
+    k = ease_out(t / 0.22)
+    scale = 0.8 + 0.2 * k
+    if scale < 0.99:
+        img = img.resize((max(1, int(img.width * scale)), max(1, int(img.height * scale))), Image.LANCZOS)
+    if k < 1:
+        img = img.copy()
+        img.putalpha(img.getchannel("A").point(lambda v: int(v * k)))
+    frame.alpha_composite(img, (int(W / 2 - img.width / 2), int(HUD_Y - img.height / 2)))
+
+
 def draw_subtitle(d, words, now):
-    word = next((w for w in words if w[1] - 0.04 <= now <= w[2] + 0.12), None)
+    word = next((w for w in words if w[1] - 0.04 <= now <= w[2] + 0.1), None)
     if not word:
         return
     w, s, _ = word
+    w = w.strip(".,!?;:\"“”—…")
+    if not w or w in ("—", "..."):
+        return
     pop = 1 + 0.12 * (1 - ease_out((now - s) / 0.12))          # small pop as each word appears
-    d.text((W / 2, SUB_Y), w.strip(".,!?;:\"“”"), font=font(int(96 * pop)), fill=WHITE + (255,),
+    d.text((W / 2, SUB_Y), w, font=font(int(92 * pop)), fill=WHITE + (255,),
            anchor="mm", stroke_width=8, stroke_fill=(0, 0, 0, 255))
 
 
-@lru_cache(maxsize=None)
-def outro_background(path):
-    """Last 3D frame, blurred and darkened, behind the logo."""
-    img = Image.open(path).convert("RGB").resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(14))
-    return Image.blend(img, Image.new("RGB", (W, H), (8, 12, 26)), 0.55).convert("RGBA")
-
-
-def draw_outro(frame, t):
-    a = ease_out(t / 0.4)
-    if LOGO_MARK.exists():
-        logo = Image.open(LOGO_MARK).convert("RGBA").resize((360, 360), Image.LANCZOS)
-        logo.putalpha(logo.getchannel("A").point(lambda v: int(v * a)))
-        frame.alpha_composite(logo, (W // 2 - 180, 600))
-    d = ImageDraw.Draw(frame)
-    d.text((W / 2, 1040), HANDLE, font=font(60), fill=YELLOW + (int(255 * a),), anchor="mm",
-           stroke_width=4, stroke_fill=(0, 0, 0, int(255 * a)))
-
-
 def compose(out_dir, log=print):
-    """Frames + subtitles + watermark + outro + audio -> reel.mp4 and cover.jpg."""
+    """Frames + headlines + subtitles + watermark + audio -> reel.mp4 and cover.jpg."""
     out_dir = Path(out_dir)
     plan = json.loads((out_dir / "plan.json").read_text())
     words = json.loads((out_dir / "words.json").read_text())
-    fps, total = plan["fps"], plan["total"]
-    outro_start = next(b["start"] for b in plan["beats"] if b["show"]["type"] == "outro")
+    fps, total, beats = plan["fps"], plan["total"], plan["beats"]
     frames = sorted((out_dir / "frames").glob("*.jpg"))
     if not frames:
         sys.exit("No frames rendered")
@@ -263,16 +291,14 @@ def compose(out_dir, log=print):
     last_path, cover = frames[0], None
     for f in range(int(total * fps)):
         now = f / fps
-        if now >= outro_start:
-            frame = outro_background(str(last_path)).copy()
-            draw_outro(frame, now - outro_start)
-        else:
-            last_path = by_index.get(f, last_path)        # a missing frame repeats the previous one
-            frame = Image.open(last_path).convert("RGB").resize((W, H), Image.LANCZOS).convert("RGBA")
-            frame.alpha_composite(watermark(), (SAFE_L, 190))
+        beat = next((b for b in reversed(beats) if now >= b["start"]), beats[0])
+        last_path = by_index.get(f, last_path)            # a missing frame repeats the previous one
+        frame = Image.open(last_path).convert("RGB").resize((W, H), Image.LANCZOS).convert("RGBA")
+        frame.alpha_composite(watermark(), (SAFE_L, 190))
+        draw_headline(frame, beat, now)
         draw_subtitle(ImageDraw.Draw(frame), words, now)
         rgb = frame.convert("RGB")
-        if cover is None and now >= plan["beats"][min(1, len(plan["beats"]) - 1)]["start"] + 1.0:
+        if cover is None and now >= 1.0:
             cover = rgb
         writer.send(np.asarray(rgb).tobytes())
     writer.close()

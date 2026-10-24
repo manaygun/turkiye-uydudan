@@ -59,7 +59,9 @@ EXPLAINER_TAGS = ["howitworks", "learnsomethingnew", "science"]
 
 
 def build_explainer_caption(topic, index):
-    """Hook first (it's all people see before "more"), then a plain-English summary, CTA, 5 hashtags."""
+    """2-line curiosity caption, a "Send this to..." line (DM shares beat likes), 4 niche hashtags."""
+    if "send" in topic:
+        return "\n".join(topic["caption"] + ["", topic["send"], "", " ".join(f"#{t}" for t in topic["tags"][:4])])
     tags = list(dict.fromkeys(topic.get("tags", [])[:2] + EXPLAINER_TAGS))[:5]
     return "\n".join([
         f"{topic['hook']} 🤔",
