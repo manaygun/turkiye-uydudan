@@ -16,6 +16,7 @@ Script beat fields:
   light    calm (cyan, default) | warning (red) | amber
   sfx      e.g. "glitch", "riser+hit", "tick+ding" (see sfx.py)
   speed    voice speed for this beat (default 1.08; 1.15 for quick transitions)
+  pause    seconds of silence after the line, visuals and SFX only (default depends on the station)
 
   python explain.py --topic airplane-lift             # all three stages locally
 """
@@ -47,6 +48,11 @@ LOGO_MARK = ROOT / "assets" / "logo_mark.png"
 SR = 44100
 GAP = 0.12                                        # pause between beats (pacing is in the script)
 LOOP_TAIL = 0.25                                  # the camera lands on Frame 0 just after the last word
+# Silent moments after a beat's narration, so the visuals can land with only music and SFX.
+# A beat can override this with "pause": seconds.
+PAUSE_AFTER = {"split": 0.9, "merge": 0.9, "stat": 1.0, "compare": 0.6, "flow": 0.5,
+               "focus": 0.4, "title": 0.5, "list": 0.6, "loop": 0.0}
+MUSIC_UNDER_VOICE, MUSIC_ALONE = 0.07, 0.2         # music dips under the voice, swells in the gaps
 
 WHITE = (245, 248, 252)
 MOOD_RGB = {"calm": (40, 200, 255), "warning": (255, 60, 50), "amber": (255, 160, 30)}
@@ -142,7 +148,8 @@ def prepare(topic, out_dir, log=print):
     beats, words, voice, t0 = [], [], [], 0.0      # beat 1 starts at Frame 0, so the loop frame-matches
     for k, beat in enumerate(topic["beats"]):
         audio, timed = tts.speak(beat["say"], speed=beat.get("speed") or tts.SPEED)
-        dur = len(audio) / tts.SR + GAP
+        speech = len(audio) / tts.SR
+        dur = speech + GAP + beat.get("pause", PAUSE_AFTER.get(beat["show"].get("type"), 0.4))
         if beat["show"].get("type") == "loop":
             dur += LOOP_TAIL
         beats.append({"start": round(t0, 3), "dur": round(dur, 3), "show": beat["show"],
@@ -157,7 +164,15 @@ def prepare(topic, out_dir, log=print):
     n = int(SR * total)
     mix = np.zeros((n, 2), np.float32)
     seed = sum(map(ord, topic["id"]))
-    mix += music.generate(topic.get("mood", "tech"), total + 1, seed=seed)[:n] * 0.10
+    # music ducks under the voice and comes up in the silent moments (smoothed so it breathes)
+    talking = np.zeros(n, np.float32)
+    for start, a in voice:
+        i = int(start * SR)
+        talking[i:i + len(a)] = 1.0
+    k = int(SR * 0.25)
+    talking = np.convolve(talking, np.ones(k, np.float32) / k, mode="same")
+    gain = MUSIC_ALONE + (MUSIC_UNDER_VOICE - MUSIC_ALONE) * talking
+    mix += music.generate(topic.get("mood", "tech"), total + 1, seed=seed)[:n] * gain[:, None]
     for k, b in enumerate(beats):                   # one sound effect on every beat
         if b["sfx"]:
             fx = sfx.sfx(b["sfx"], seed=seed + k)
